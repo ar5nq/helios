@@ -28,29 +28,91 @@ def _atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     return tr.rolling(period).mean()
 
 
+def _macd_line(close: pd.Series, period: int) -> tuple:
+    fast = max(2, period // 2)
+    slow = period
+    signal_span = max(2, period // 4)
+    macd = close.ewm(span=fast).mean() - close.ewm(span=slow).mean()
+    signal = macd.ewm(span=signal_span).mean()
+    return macd, signal
+
+
+def _bollinger_bands(close: pd.Series, period: int, threshold: float) -> tuple:
+    ma = close.rolling(period).mean()
+    std = close.rolling(period).std()
+    width = 1.0 + threshold * 2  # threshold widens/narrows the bands
+    return ma + width * std, ma - width * std
+
+
+def _cci(df: pd.DataFrame, period: int) -> pd.Series:
+    typical = (df["High"] + df["Low"] + df["Close"]) / 3
+    ma = typical.rolling(period).mean()
+    mean_dev = (typical - ma).abs().rolling(period).mean()
+    return (typical - ma) / (0.015 * mean_dev.replace(0, np.nan))
+
+
+def _williams_r(df: pd.DataFrame, period: int) -> pd.Series:
+    highest_high = df["High"].rolling(period).max()
+    lowest_low = df["Low"].rolling(period).min()
+    return (highest_high - df["Close"]) / (highest_high - lowest_low).replace(0, np.nan) * -100
+
+
 def _raw_signal(df: pd.DataFrame, genome: dict) -> pd.Series:
-    """The primary entry trigger, before bias/filter gating."""
+    """The primary entry trigger, before bias/filter gating.
+    Every indicator has its own genuinely distinct formula -- no shared
+    generic fallback, so 'MACD' and 'CCI' genomes actually trade differently."""
     period = genome["signal_params"]["period"]
     threshold = genome["signal_params"]["threshold"]
     close = df["Close"]
+    indicator = genome["signal_indicator"]
 
-    if genome["signal_indicator"] == "RSI":
+    if indicator == "RSI":
         rsi = _rsi(close, period)
         long = rsi < (30 * (1 + (0.5 - threshold)))
         short = rsi > (70 * (1 + (threshold - 0.5)))
-    elif genome["signal_indicator"] in ("SMA", "EMA"):
-        ma = close.rolling(period).mean() if genome["signal_indicator"] == "SMA" else close.ewm(span=period).mean()
+
+    elif indicator in ("SMA", "EMA"):
+        ma = close.rolling(period).mean() if indicator == "SMA" else close.ewm(span=period).mean()
         long = close > ma
         short = close < ma
+
+    elif indicator == "MACD":
+        macd, signal = _macd_line(close, period)
+        long = macd > signal
+        short = macd < signal
+
+    elif indicator == "ATR":
+        # volatility breakout: long/short when price moves further than
+        # threshold x ATR from the prior close
+        atr = _atr(df, period)
+        move = close.diff()
+        long = move > atr * threshold * 2
+        short = move < -atr * threshold * 2
+
+    elif indicator == "BOLLINGER":
+        upper, lower = _bollinger_bands(close, period, threshold)
+        long = close > upper   # breakout above the band
+        short = close < lower  # breakout below the band
+
+    elif indicator == "CCI":
+        cci = _cci(df, period)
+        band = 100 * (1 + threshold)
+        long = cci < -band   # oversold -> mean-reversion long
+        short = cci > band   # overbought -> mean-reversion short
+
+    elif indicator == "WILLIAMS_R":
+        wr = _williams_r(df, period)
+        oversold = -80 - threshold * 15
+        overbought = -20 + threshold * 15
+        long = wr < oversold
+        short = wr > overbought
+
     else:
-        # generic momentum proxy for MACD/ATR/BOLLINGER/CCI/WILLIAMS_R
-        mom = close.pct_change(period)
-        long = mom > threshold * mom.std()
-        short = mom < -threshold * mom.std()
+        raise ValueError(f"Unknown signal_indicator: {indicator}")
 
     sig = pd.Series(0, index=df.index)
-    sig[long] = 1
-    sig[short] = -1
+    sig[long.fillna(False)] = 1
+    sig[short.fillna(False)] = -1
     return sig
 
 
