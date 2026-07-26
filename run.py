@@ -12,8 +12,8 @@ import json
 from engine.campaign import run_campaign
 from signals.signal_engine import emit_signal, genome_live_stats, list_signals, mark_taken, report_outcome
 from news.calendar_feed import fetch_week, high_impact_today, upcoming_by_color, format_alert, SYMBOL_TO_CURRENCIES
-from engine.risk import calculate_lot_size
-from engine.dashboard import build_and_open
+from engine.risk import calculate_lot_size, save_account, load_account
+from engine.dashboard_server import build_and_open
 
 
 def _calc_rr(entry: float, stop: float, target: float) -> float:
@@ -60,12 +60,20 @@ def main():
                                "You can report this even if you skipped the trade (--taken no).")
 
     lotsize = sub.add_parser("lotsize", help="calculate position size from account risk")
-    lotsize.add_argument("--account", type=float, required=True, help="account size, e.g. 5000")
-    lotsize.add_argument("--risk", type=float, required=True, help="% of account to risk, e.g. 1.0")
-    lotsize.add_argument("--entry", type=float, required=True)
-    lotsize.add_argument("--stop", type=float, required=True)
-    lotsize.add_argument("--point-value", type=float, default=1.0,
-                          help="$ per 1.0 price-unit move per 1.0 lot for YOUR broker (check contract specs)")
+    lotsize.add_argument("signal_id", nargs="?",
+                          help="pull entry/stop straight from this signal instead of typing them")
+    lotsize.add_argument("--account", type=float, help="account size (uses saved default if omitted)")
+    lotsize.add_argument("--risk", type=float, help="%% of account to risk (uses saved default if omitted)")
+    lotsize.add_argument("--entry", type=float, help="only needed if not giving a signal_id")
+    lotsize.add_argument("--stop", type=float, help="only needed if not giving a signal_id")
+    lotsize.add_argument("--point-value", type=float,
+                          help="$ per 1.0 price-unit move per 1.0 lot (uses saved default for the symbol if omitted)")
+
+    account = sub.add_parser("account", help="save your account size / default risk so lotsize doesn't need retyping")
+    account.add_argument("--size", type=float, help="account size, e.g. 5000")
+    account.add_argument("--risk", type=float, help="default %% risk per trade, e.g. 1.0")
+    account.add_argument("--point-value", nargs=2, metavar=("SYMBOL", "VALUE"), action="append",
+                          help="set point value for a symbol, e.g. --point-value NAS100 1.0 (repeatable)")
 
     sub.add_parser("dashboard", help="generate and open the local vault/signals dashboard")
 
@@ -129,12 +137,53 @@ def main():
         print(f"Updated signal {args.signal_id}.")
 
     elif args.cmd == "lotsize":
-        result = calculate_lot_size(args.account, args.risk, args.entry, args.stop, args.point_value)
+        saved = load_account()
+
+        entry, stop, symbol = args.entry, args.stop, None
+        if args.signal_id:
+            sigs = list_signals(pending_only=False)
+            match = next((s for s in sigs if s["id"] == args.signal_id), None)
+            if not match:
+                print(f"No signal found with id {args.signal_id}")
+                return
+            entry, stop, symbol = match["entry"], match["stop"], match["symbol"]
+
+        if entry is None or stop is None:
+            print("Give a signal_id, or both --entry and --stop.")
+            return
+
+        account_size = args.account or saved.get("account_size")
+        risk_percent = args.risk or saved.get("default_risk_percent")
+        if account_size is None or risk_percent is None:
+            print("No account settings saved yet. Run: python run.py account --size 5000 --risk 1")
+            return
+
+        point_value = args.point_value
+        if point_value is None and symbol:
+            point_value = saved.get("point_values", {}).get(symbol)
+        point_value = point_value or 1.0
+
+        result = calculate_lot_size(account_size, risk_percent, entry, stop, point_value)
         print(json.dumps(result, indent=2))
 
+    elif args.cmd == "account":
+        current = load_account()
+        size = args.size if args.size is not None else current.get("account_size")
+        risk = args.risk if args.risk is not None else current.get("default_risk_percent")
+        point_values = dict(current.get("point_values", {}))
+        if args.point_value:
+            for sym, val in args.point_value:
+                point_values[sym.upper()] = float(val)
+
+        if size is None or risk is None:
+            print("First time setup needs both: python run.py account --size 5000 --risk 1")
+            return
+
+        saved = save_account(size, risk, point_values)
+        print(json.dumps(saved, indent=2))
+
     elif args.cmd == "dashboard":
-        path = build_and_open()
-        print(f"Dashboard generated at {path} and opened in your browser.")
+        build_and_open()
 
 
 if __name__ == "__main__":

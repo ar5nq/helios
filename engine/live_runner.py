@@ -18,6 +18,7 @@ import traceback
 
 from .data_feed import fetch
 from .backtest import latest_signal
+from .killzones import current_killzone, is_in_any_killzone
 from signals.signal_engine import emit_signal
 from news.calendar_feed import fetch_week, high_impact_today, format_alert
 from notifications.telegram import send_message, format_signal_message, format_news_message
@@ -26,6 +27,7 @@ VAULT_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "vault.json")
 STATE_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "runner_state.json")
 
 POLL_SECONDS = 60 * 15  # check every 15 minutes; adjust to your fastest timeframe
+ENFORCE_KILLZONES = True  # only fire signals during ICT killzone session windows
 
 
 def _load_json(path, default):
@@ -55,6 +57,9 @@ def check_genomes_once(notify: bool = True) -> list:
     vault = _load_json(VAULT_PATH, [])
     state = _load_json(STATE_PATH, {"last_bar_alerted": {}, "news_alerted": []})
     fired = []
+
+    if ENFORCE_KILLZONES and not is_in_any_killzone():
+        return fired  # outside Asian/London/NY session windows -- don't fire
 
     candidates = []  # (entry_dict, sig_dict) pairs that fired this cycle
     for entry in vault:
@@ -92,12 +97,17 @@ def check_genomes_once(notify: bool = True) -> list:
         members.sort(key=lambda m: m[0].get("score", {}).get("fitness", 0), reverse=True)
         rep_entry, rep_sig = members[0]
         genome_ids = [e["id"] for e, _ in members]
+        killzone = current_killzone() or "unknown"
+
+        note_parts = [f"{killzone} killzone"]
+        if len(genome_ids) > 1:
+            note_parts.append(f"confirmed by {len(genome_ids)} genome(s): {', '.join(genome_ids)}")
 
         signal = emit_signal(
             genome_id=rep_entry["id"], symbol=symbol, timeframe=timeframe,
             direction=direction, entry=rep_sig["entry"],
             stop=rep_sig["stop"], target=rep_sig["target"],
-            note=f"confirmed by {len(genome_ids)} genome(s): {', '.join(genome_ids)}" if len(genome_ids) > 1 else "",
+            note=" | ".join(note_parts),
         )
         fired.append(signal)
 

@@ -16,6 +16,33 @@ BROKER -- these vary):
 """
 
 
+import json
+import os
+
+ACCOUNT_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "account.json")
+
+
+def save_account(account_size: float, default_risk_percent: float, point_values: dict = None) -> dict:
+    """point_values: optional {'NAS100': 1.0, 'XAUUSD': 1.0, ...} per-symbol
+    $ value of 1.0 price-unit move per 1.0 lot for YOUR broker."""
+    config = {
+        "account_size": account_size,
+        "default_risk_percent": default_risk_percent,
+        "point_values": point_values or {},
+    }
+    os.makedirs(os.path.dirname(ACCOUNT_PATH), exist_ok=True)
+    with open(ACCOUNT_PATH, "w") as f:
+        json.dump(config, f, indent=2)
+    return config
+
+
+def load_account() -> dict:
+    if os.path.exists(ACCOUNT_PATH):
+        with open(ACCOUNT_PATH) as f:
+            return json.load(f)
+    return {"account_size": None, "default_risk_percent": None, "point_values": {}}
+
+
 def calculate_lot_size(account_size: float, risk_percent: float,
                         entry: float, stop: float, point_value: float = 1.0) -> dict:
     """
