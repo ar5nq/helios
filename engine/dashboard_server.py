@@ -585,7 +585,9 @@ function openInspector(genomeId) {{
     </div>
     <div class="insp-box" style="margin:0 16px 16px 16px">
       <div class="insp-label">Equity Curve <span class="dim">(gray = train/in-sample, red = test/out-of-sample -- the honest part)</span></div>
-      <canvas id="equity-canvas" width="900" height="180" style="width:100%; height:180px;"></canvas>
+      <div style="position:relative; height:250px; width:100%">
+        <canvas id="equity-canvas"></canvas>
+      </div>
       <div style="display:flex; justify-content:space-between; margin-top:8px; font-size:11px">
         <span class="dim">IS: <span style="color:var(--text)">${{train.return_pct ?? '--'}}%</span></span>
         <span class="dim">OOS: <span style="color:var(--red)">${{test.return_pct ?? '--'}}%</span></span>
