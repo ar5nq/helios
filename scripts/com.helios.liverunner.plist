@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.helios.liverunner</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/Users/syedabdulrasheed/helios/run_live_runner.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/syedabdulrasheed/helios</string>
+
+    <!-- Starts automatically when you log in -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restarts automatically if it crashes -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Where its output goes, since there's no visible terminal window anymore -->
+    <key>StandardOutPath</key>
+    <string>/Users/syedabdulrasheed/helios/logs/runner.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/syedabdulrasheed/helios/logs/runner-error.log</string>
+</dict>
+</plist>

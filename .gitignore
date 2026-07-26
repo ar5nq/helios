@@ -5,3 +5,4 @@ venv/
 data/vault.json
 data/signal_log.json
 data/runner_state.json
+logs/*.log
