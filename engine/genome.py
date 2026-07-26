@@ -30,6 +30,17 @@ FILTER_NAMES = {
 }
 
 
+MECHANISM_NAMES = {
+    "FIXED_RR": "Fixed RR",
+    "TRAILING_STOP": "Trailing Runner",
+    "ATR_STOP": "Vol-Adaptive Stop",
+}
+
+
+def genome_mechanism(genome: dict) -> str:
+    return MECHANISM_NAMES.get(genome.get("exec_mode"), genome.get("exec_mode", "?"))
+
+
 def genome_label(genome: dict) -> str:
     """Human-readable name built from what the strategy actually does,
     e.g. 'RSI Reversal (HTF, Anti-Chop)' instead of a hex id."""

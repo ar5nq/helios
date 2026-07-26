@@ -1,0 +1,7 @@
+{
+  "account_size": 5000.0,
+  "default_risk_percent": 1.0,
+  "point_values": {
+    "NAS100": 1.0
+  }
+}
