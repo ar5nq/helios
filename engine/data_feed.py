@@ -13,6 +13,7 @@ SYMBOL_MAP = {
                         # NYSE cash hours (9:30am-4pm ET); NQ=F trades nearly
                         # 24hrs/day Sun evening-Fri evening, matching what
                         # brokers actually quote as "NAS100"
+    "US500": "ES=F",    # S&P 500 futures -- used as the SMT divergence reference for NAS100
     "GBPJPY": "GBPJPY=X",
     "GBPUSD": "GBPUSD=X",
     "USDJPY": "JPY=X",
@@ -20,6 +21,14 @@ SYMBOL_MAP = {
     "EURGBP": "EURGBP=X",
     "AUDUSD": "AUDUSD=X",
     "USDCAD": "CAD=X",
+}
+
+# For SMT (Smart Money Divergence): which reference instrument to compare
+# a symbol against. NAS100 vs US500 is the classic ICT pairing -- both
+# usually make highs/lows together; when they DON'T, that's the divergence.
+SMT_REFERENCE = {
+    "NAS100": "US500",
+    "US500": "NAS100",
 }
 
 TF_MAP = {

@@ -16,7 +16,7 @@ import os
 import time
 import traceback
 
-from .data_feed import fetch
+from .data_feed import fetch, SMT_REFERENCE
 from .backtest import latest_signal
 from .killzones import current_killzone, is_in_any_killzone
 from .active_strategies import get_active
@@ -74,7 +74,12 @@ def check_genomes_once(notify: bool = True) -> list:
         symbol, timeframe = entry["symbol"], entry["timeframe"]
         try:
             df = fetch(symbol, timeframe)
-            sig = latest_signal(df, entry)
+            reference_df = None
+            if entry.get("signal_indicator") == "SMT":
+                ref_symbol = SMT_REFERENCE.get(symbol)
+                if ref_symbol:
+                    reference_df = fetch(ref_symbol, timeframe)
+            sig = latest_signal(df, entry, reference_df)
         except Exception:
             print(f"[warn] failed to check genome {genome_id}: {traceback.format_exc()}")
             continue

@@ -123,7 +123,7 @@ def _williams_r(df: pd.DataFrame, period: int) -> pd.Series:
     return (highest_high - df["Close"]) / (highest_high - lowest_low).replace(0, np.nan) * -100
 
 
-def _raw_signal(df: pd.DataFrame, genome: dict) -> pd.Series:
+def _raw_signal(df: pd.DataFrame, genome: dict, reference_df: pd.DataFrame = None) -> pd.Series:
     """The primary entry trigger, before bias/filter gating.
     Every indicator has its own genuinely distinct formula -- no shared
     generic fallback, so 'MACD' and 'CCI' genomes actually trade differently."""
@@ -183,6 +183,14 @@ def _raw_signal(df: pd.DataFrame, genome: dict) -> pd.Series:
         long = raw == 1
         short = raw == -1
 
+    elif indicator == "SMT":
+        if reference_df is None:
+            raise ValueError("SMT indicator requires reference_df (a correlated instrument)")
+        from .smt import detect_smt_signal
+        raw = detect_smt_signal(df, reference_df, window=max(10, period))
+        long = raw == 1
+        short = raw == -1
+
     else:
         raise ValueError(f"Unknown signal_indicator: {indicator}")
 
@@ -239,16 +247,16 @@ def _apply_filter(sig: pd.Series, df: pd.DataFrame, genome: dict) -> pd.Series:
     return gated
 
 
-def _signal_series(df: pd.DataFrame, genome: dict) -> pd.Series:
+def _signal_series(df: pd.DataFrame, genome: dict, reference_df: pd.DataFrame = None) -> pd.Series:
     """Full signal pipeline: raw entry trigger -> bias gate -> filter gate.
     All three genome genes now genuinely change trading behavior."""
-    sig = _raw_signal(df, genome)
+    sig = _raw_signal(df, genome, reference_df)
     sig = _apply_bias(sig, df, genome)
     sig = _apply_filter(sig, df, genome)
     return sig
 
 
-def latest_signal(df: pd.DataFrame, genome: dict) -> dict:
+def latest_signal(df: pd.DataFrame, genome: dict, reference_df: pd.DataFrame = None) -> dict:
     """Returns the signal direction on the most recent CONFIRMED (closed) bar,
     plus entry/stop/target sized according to the genome's exec_mode and rr.
     Used by the live runner to decide whether to emit a new signal.
@@ -288,7 +296,7 @@ def latest_signal(df: pd.DataFrame, genome: dict) -> dict:
             "bar_time": str(df.index[-1]), "is_stale": True,
         }
 
-    sig = _signal_series(df, genome)
+    sig = _signal_series(df, genome, reference_df)
     direction_code = int(sig.iloc[-1])
     close = float(df["Close"].iloc[-1])
 
@@ -332,16 +340,25 @@ def _downsample(series: pd.Series, max_points: int = 80) -> list:
     return [round(float(v), 4) for v in series.iloc[::step]]
 
 
-def run_backtest(df: pd.DataFrame, genome: dict, train_frac: float = 0.7) -> dict:
-    """Returns a dict of stats for TRAIN and TEST windows, plus a combined fitness score."""
+def run_backtest(df: pd.DataFrame, genome: dict, train_frac: float = 0.7,
+                  reference_df: pd.DataFrame = None) -> dict:
+    """Returns a dict of stats for TRAIN and TEST windows, plus a combined fitness score.
+    reference_df: only needed if genome uses the SMT indicator (a correlated
+    instrument's OHLC data, aligned separately inside _signal_series)."""
     df = df.dropna().copy()
     split = int(len(df) * train_frac)
     train, test = df.iloc[:split], df.iloc[split:]
 
-    def score_window(window: pd.DataFrame) -> dict:
+    ref_train, ref_test = None, None
+    if reference_df is not None:
+        reference_df = reference_df.dropna().copy()
+        ref_split = int(len(reference_df) * train_frac)
+        ref_train, ref_test = reference_df.iloc[:ref_split], reference_df.iloc[ref_split:]
+
+    def score_window(window: pd.DataFrame, ref_window: pd.DataFrame = None) -> dict:
         if len(window) < 20:
             return {"return_pct": 0.0, "max_dd_pct": 0.0, "win_rate": 0.0, "trades": 0, "equity_curve": []}
-        sig = _signal_series(window, genome).shift(1).fillna(0)  # act on next bar
+        sig = _signal_series(window, genome, ref_window).shift(1).fillna(0)  # act on next bar
         rets = window["Close"].pct_change().fillna(0)
         strat_rets = sig * rets
 
@@ -362,8 +379,8 @@ def run_backtest(df: pd.DataFrame, genome: dict, train_frac: float = 0.7) -> dic
             "equity_curve": _downsample(equity),
         }
 
-    train_stats = score_window(train)
-    test_stats = score_window(test)
+    train_stats = score_window(train, ref_train)
+    test_stats = score_window(test, ref_test)
 
     # Fitness rewards OOS return, penalizes OOS drawdown, and penalizes
     # a strategy that only worked in-sample (curve-fitting).

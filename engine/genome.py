@@ -10,7 +10,7 @@ so a strategy's genetic makeup is inspectable at a glance.
 import random
 import uuid
 
-INDICATORS = ["SMA", "EMA", "RSI", "MACD", "ATR", "BOLLINGER", "CCI", "WILLIAMS_R", "FVG", "OTE"]
+INDICATORS = ["SMA", "EMA", "RSI", "MACD", "ATR", "BOLLINGER", "CCI", "WILLIAMS_R", "FVG", "OTE", "SMT"]
 BIAS_MODES = ["HTF_TREND", "NONE", "TRAILING"]
 FILTER_MODES = ["NONE", "ATR_REGIME", "CHOP", "RSI_RANGE"]
 EXEC_MODES = ["FIXED_RR", "TRAILING_STOP", "ATR_STOP"]
@@ -22,7 +22,7 @@ INDICATOR_NAMES = {
     "SMA": "MA Cross", "EMA": "EMA Trend", "RSI": "RSI Reversal",
     "MACD": "MACD Cross", "ATR": "Vol Breakout", "BOLLINGER": "Band Breakout",
     "CCI": "CCI Reversion", "WILLIAMS_R": "Williams Reversion",
-    "FVG": "FVG Tap", "OTE": "OTE Retracement",
+    "FVG": "FVG Tap", "OTE": "OTE Retracement", "SMT": "SMT Divergence",
 }
 BIAS_NAMES = {"HTF_TREND": "HTF", "TRAILING": "Trail", "NONE": None}
 FILTER_NAMES = {
@@ -53,6 +53,7 @@ INDICATOR_EXPLAIN = {
     "WILLIAMS_R": "enters on Williams %R oversold/overbought extremes -- another mean-reversion trigger",
     "FVG": "enters when price taps back into an unfilled Fair Value Gap -- an ICT-style imbalance-fill trigger",
     "OTE": "enters when price retraces into the 61.8-79% Fibonacci zone of a recent swing -- ICT's Optimal Trade Entry",
+    "SMT": "enters when this instrument makes a fresh high/low that its correlated pair (e.g. SP500 for NAS100) does NOT confirm -- a smart-money divergence, betting the unconfirmed move reverses",
 }
 BIAS_EXPLAIN = {
     "HTF_TREND": "only takes trades that agree with the direction of a higher-timeframe trend filter",
@@ -70,6 +71,66 @@ MECHANISM_EXPLAIN = {
     "TRAILING_STOP": "uses a wider stop (1.5x ATR) to give the trade room to run -- meant for trades you let breathe",
     "ATR_STOP": "sizes its stop directly off current volatility (ATR) -- tightens up in calm markets, widens in wild ones",
 }
+
+
+def explain_genome_cards(genome: dict) -> list:
+    """Structured card data for the dashboard's visual explanation --
+    each card is one piece of the strategy's decision-making, so it reads
+    like a tutorial breakdown instead of a wall of text."""
+    indicator = genome.get("signal_indicator")
+    bias = genome.get("bias", "NONE")
+    filt = genome.get("filter", "NONE")
+    exec_mode = genome.get("exec_mode", "FIXED_RR")
+    rr = genome.get("rr", 1.5)
+
+    return [
+        {
+            "icon": "🎯", "title": "Entry Trigger", "tag": INDICATOR_NAMES.get(indicator, indicator),
+            "body": INDICATOR_EXPLAIN.get(indicator, "custom trigger logic"),
+        },
+        {
+            "icon": "📈", "title": "Trend Filter", "tag": bias,
+            "body": BIAS_EXPLAIN.get(bias, ""),
+        },
+        {
+            "icon": "🧹", "title": "Extra Filter", "tag": filt,
+            "body": FILTER_EXPLAIN.get(filt, ""),
+        },
+        {
+            "icon": "🛡️", "title": "Trade Management", "tag": f"1:{rr} RR",
+            "body": MECHANISM_EXPLAIN.get(exec_mode, ""),
+        },
+    ]
+
+
+def explain_genome_cards(genome: dict) -> dict:
+    """Structured breakdown for rendering as separate visual cards, instead
+    of one wall-of-text paragraph -- entry trigger, bias, filter, and trade
+    management each get their own card."""
+    indicator = genome.get("signal_indicator")
+    bias = genome.get("bias")
+    filt = genome.get("filter")
+    exec_mode = genome.get("exec_mode")
+    rr = genome.get("rr", 1.5)
+
+    return {
+        "entry": {
+            "title": INDICATOR_NAMES.get(indicator, indicator),
+            "text": INDICATOR_EXPLAIN.get(indicator, "Uses a custom trigger."),
+        },
+        "bias": {
+            "title": bias if bias != "NONE" else "No trend filter",
+            "text": BIAS_EXPLAIN.get(bias, ""),
+        },
+        "filter": {
+            "title": filt if filt != "NONE" else "No extra filter",
+            "text": FILTER_EXPLAIN.get(filt, ""),
+        },
+        "management": {
+            "title": MECHANISM_NAMES.get(exec_mode, exec_mode),
+            "text": f"{MECHANISM_EXPLAIN.get(exec_mode, '')} Targets a 1:{rr} reward-to-risk ratio.",
+        },
+    }
 
 
 def explain_genome(genome: dict) -> str:

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from .genome import random_genome, mutate, crossover
 from .backtest import run_backtest
-from .data_feed import fetch
+from .data_feed import fetch, SMT_REFERENCE
 
 VAULT_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "vault.json")
 
@@ -39,6 +39,14 @@ def run_campaign(symbol: str, timeframe: str, population: int = 40,
                   fitness_gate: float = 1.0, immigrant_frac: float = 0.3,
                   min_test_trades: int = 25) -> dict:
     df = fetch(symbol, timeframe)
+
+    reference_df = None
+    ref_symbol = SMT_REFERENCE.get(symbol)
+    if ref_symbol:
+        try:
+            reference_df = fetch(ref_symbol, timeframe)
+        except Exception:
+            reference_df = None  # SMT genomes will just fail their backtest and get skipped
     pop = [random_genome(symbol, timeframe) for _ in range(population)]
 
     history = []
@@ -46,7 +54,7 @@ def run_campaign(symbol: str, timeframe: str, population: int = 40,
         scored = []
         for g in pop:
             try:
-                result = run_backtest(df, g)
+                result = run_backtest(df, g, reference_df=reference_df)
             except Exception:
                 continue
             scored.append((g, result))

@@ -14,7 +14,7 @@ import webbrowser
 
 from flask import Flask, jsonify, request
 
-from .genome import genome_label, genome_mechanism, explain_genome
+from .genome import genome_label, genome_mechanism, explain_genome, explain_genome_cards, explain_genome_cards
 from .portfolio import analyze_portfolio
 from .active_strategies import get_active, activate, deactivate
 from .risk import calculate_lot_size, load_account
@@ -58,7 +58,8 @@ def index():
 
     labels = {g["id"]: genome_label(g) for g in vault}
     mechanisms = {g["id"]: genome_mechanism(g) for g in vault}
-    explanations = {g["id"]: explain_genome(g) for g in vault}
+    explanations = {g["id"]: explain_genome_cards(g) for g in vault}
+    explain_cards = {g["id"]: explain_genome_cards(g) for g in vault}
     active_ids = get_active()
     for s in signals:
         s["_lot"] = _lot_size_for(s)
@@ -70,6 +71,7 @@ def index():
     mechanisms_json = json.dumps(mechanisms)
     active_json = json.dumps(active_ids)
     explanations_json = json.dumps(explanations)
+    explain_cards_json = json.dumps(explain_cards)
 
     return f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Helios // Strategy Vault</title>
@@ -126,6 +128,17 @@ def index():
   .insp-tag {{ display: inline-block; border: 1px solid var(--border); padding: 2px 8px; margin: 2px 4px 2px 0; font-size: 11px; color: var(--text-dim); }}
   .close-insp {{ float: right; cursor: pointer; color: var(--text-dim); }}
   .close-insp:hover {{ color: var(--red); }}
+  .explain-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 0 16px 16px 16px; }}
+  .explain-card {{ border: 1px solid var(--border); padding: 10px; }}
+  .explain-card .card-num {{ color: var(--red); font-size: 10px; font-weight: 600; }}
+  .explain-card .card-title {{ font-size: 13px; font-weight: 600; margin: 4px 0 6px 0; }}
+  .explain-card .card-text {{ font-size: 11px; line-height: 1.5; color: var(--text-dim); }}
+  .explain-cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; padding: 0 16px 16px 16px; }}
+  .explain-card {{ background: var(--bg); border: 1px solid var(--border); padding: 12px; }}
+  .explain-card .icon {{ font-size: 18px; }}
+  .explain-card .title {{ font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--red); margin: 6px 0 2px 0; }}
+  .explain-card .tag {{ font-size: 10px; color: var(--text-dim); margin-bottom: 6px; }}
+  .explain-card .body {{ font-size: 11px; line-height: 1.5; color: var(--text); }}
 </style></head>
 <body>
 
@@ -358,6 +371,12 @@ function openInspector(genomeId) {{
   const score = g.score || {{}};
   const train = score.train || {{}};
   const test = score.test || {{}};
+  const ex = explanations[g.id] || {{
+    entry: {{title:'--', text:'No explanation available.'}},
+    bias: {{title:'--', text:''}},
+    filter: {{title:'--', text:''}},
+    management: {{title:'--', text:''}}
+  }};
 
   document.getElementById('insp-title').textContent =
     `Inspector // ${{g.symbol}} ${{g.timeframe}} // ${{g.id}}`;
@@ -382,9 +401,27 @@ function openInspector(genomeId) {{
         <div class="insp-stat-row"><span class="dim">Trades</span><span>${{train.trades ?? '--'}} <span class="dim">/</span> ${{test.trades ?? '--'}}</span></div>
       </div>
     </div>
-    <div class="insp-box" style="margin:0 16px 16px 16px">
-      <div class="insp-label">What this strategy actually does</div>
-      <div style="font-size:12px; line-height:1.6">${{explanations[g.id] || 'No explanation available.'}}</div>
+    <div class="explain-grid">
+      <div class="explain-card">
+        <div class="card-num">1. ENTRY TRIGGER</div>
+        <div class="card-title">${{ex.entry.title}}</div>
+        <div class="card-text">${{ex.entry.text}}</div>
+      </div>
+      <div class="explain-card">
+        <div class="card-num">2. TREND BIAS</div>
+        <div class="card-title">${{ex.bias.title}}</div>
+        <div class="card-text">${{ex.bias.text}}</div>
+      </div>
+      <div class="explain-card">
+        <div class="card-num">3. FILTER</div>
+        <div class="card-title">${{ex.filter.title}}</div>
+        <div class="card-text">${{ex.filter.text}}</div>
+      </div>
+      <div class="explain-card">
+        <div class="card-num">4. TRADE MANAGEMENT</div>
+        <div class="card-title">${{ex.management.title}}</div>
+        <div class="card-text">${{ex.management.text}}</div>
+      </div>
     </div>
     <div class="insp-box" style="margin:0 16px 16px 16px">
       <div class="insp-label">Equity Curve <span class="dim">(gray = train/in-sample, red = test/out-of-sample -- the honest part)</span></div>
