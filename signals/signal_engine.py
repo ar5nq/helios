@@ -75,6 +75,17 @@ def report_outcome(signal_id: str, outcome: str) -> dict:
     raise ValueError(f"No signal with id {signal_id}")
 
 
+def list_signals(pending_only: bool = True) -> list:
+    """pending_only=True: signals that don't yet have BOTH taken and outcome set.
+    You can still record an outcome even if taken=False (a signal you skipped
+    but want to track hypothetically), so 'pending' here just means either
+    field is still unanswered."""
+    log = _load()
+    if not pending_only:
+        return log
+    return [s for s in log if s["taken"] is None or s["outcome"] is None]
+
+
 def genome_live_stats(genome_id: str) -> dict:
     """Live (post-vault) win rate for a genome, based on reported outcomes only."""
     log = _load()

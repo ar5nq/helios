@@ -10,8 +10,8 @@ import argparse
 import json
 
 from engine.campaign import run_campaign
-from signals.signal_engine import emit_signal, genome_live_stats
-from news.calendar_feed import fetch_week, high_impact_today, format_alert
+from signals.signal_engine import emit_signal, genome_live_stats, list_signals, mark_taken, report_outcome
+from news.calendar_feed import fetch_week, high_impact_today, upcoming_by_color, format_alert
 
 
 def main():
@@ -33,7 +33,22 @@ def main():
     signal.add_argument("--stop", type=float, required=True)
     signal.add_argument("--target", type=float, required=True)
 
-    sub.add_parser("news")
+    news = sub.add_parser("news")
+    news.add_argument("--today", action="store_true",
+                       help="only show today's events (default: rest of this week)")
+    news.add_argument("--color", choices=["red", "orange", "yellow"], default="red",
+                       help="red=High only (default), orange=Medium+High, yellow=Low+Medium+High")
+
+    signals_cmd = sub.add_parser("signals", help="list pending signals waiting for your response")
+    signals_cmd.add_argument("--all", action="store_true", help="show every signal, not just pending ones")
+
+    respond = sub.add_parser("respond", help="record what happened to a signal")
+    respond.add_argument("signal_id")
+    respond.add_argument("--taken", choices=["yes", "no"],
+                          help="did you actually take this trade?")
+    respond.add_argument("--outcome", choices=["win", "loss", "be"],
+                          help="how did it turn out -- win, loss, or breakeven (be)? "
+                               "You can report this even if you skipped the trade (--taken no).")
 
     args = parser.parse_args()
 
@@ -48,11 +63,41 @@ def main():
 
     elif args.cmd == "news":
         events = fetch_week()
-        alerts = high_impact_today(events)
+        if args.today:
+            alerts = high_impact_today(events)
+            label = "today"
+        else:
+            alerts = upcoming_by_color(events, color=args.color)
+            label = f"this week ({args.color} and above)"
+
         if not alerts:
-            print("No high-impact events today.")
+            print(f"No matching events {label}.")
         for e in alerts:
             print(format_alert(e))
+
+    elif args.cmd == "signals":
+        sigs = list_signals(pending_only=not args.all)
+        if not sigs:
+            print("No pending signals." if not args.all else "No signals logged yet.")
+        for s in sigs:
+            taken_str = {True: "TAKEN", False: "SKIPPED", None: "?"}[s["taken"]]
+            outcome_str = s["outcome"] or "?"
+            print(f"[{s['id']}] {s['direction']} {s['symbol']} ({s['timeframe']}) "
+                  f"entry={s['entry']} stop={s['stop']} target={s['target']} "
+                  f"| genome={s['genome_id']} | taken={taken_str} outcome={outcome_str}")
+            if s.get("note"):
+                print(f"    note: {s['note']}")
+
+    elif args.cmd == "respond":
+        if not args.taken and not args.outcome:
+            print("Give at least --taken yes/no or --outcome win/loss/be")
+            return
+        if args.taken:
+            mark_taken(args.signal_id, args.taken == "yes")
+        if args.outcome:
+            outcome_map = {"win": "WIN", "loss": "LOSS", "be": "BREAKEVEN"}
+            report_outcome(args.signal_id, outcome_map[args.outcome])
+        print(f"Updated signal {args.signal_id}.")
 
 
 if __name__ == "__main__":
