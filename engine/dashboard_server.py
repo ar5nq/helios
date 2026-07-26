@@ -316,26 +316,54 @@ async function buildPortfolio() {{
     body: JSON.stringify({{genome_ids: ids}})
   }});
   const r = await resp.json();
-  const gradeColor = ['A','B'].includes(r.overall_grade) ? 'green' : ['C'].includes(r.overall_grade) ? '' : 'red';
+
+  const gradeClass = (g) => ['A','B'].includes(g) ? 'green' : ['C'].includes(g) ? '' : 'red';
+  const badge = (label, sub) => `
+    <div style="text-align:center; flex:1">
+      <div class="dim" style="font-size:9px; text-transform:uppercase; margin-bottom:4px">${{label}}</div>
+      <div class="value ${{gradeClass(sub.grade)}}" style="font-size:22px; font-weight:700">${{sub.grade}}</div>
+      <div class="dim" style="font-size:9px">${{sub.score}}/100</div>
+    </div>`;
+
+  const bucketBar = (label, b) => `
+    <div style="margin-bottom:10px">
+      <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:3px">
+        <span class="dim">${{label}}</span>
+        <span class="dim">${{b.buckets}} buckets -- top ${{b.top_value}} ${{b.top_pct}}%</span>
+      </div>
+      <div class="class-comp-bar" style="height:6px">
+        <div style="width:${{b.top_pct}}%; background:${{b.top_pct > 60 ? '#e8384f' : '#3ecf8e'}}"></div>
+        <div style="width:${{100 - b.top_pct}}%; background:#2a1418"></div>
+      </div>
+    </div>`;
+
   el.innerHTML = `
     <div class="insp-grid">
-      <div class="insp-box">
-        <div class="insp-label">Overall Diversity Grade</div>
-        <div class="value ${{gradeColor}}" style="font-size:32px">${{r.overall_grade}}</div>
-        <div class="dim">${{r.members}} strategies, score ${{r.overall_score}}/100</div>
-      </div>
-      <div class="insp-box">
-        <div class="insp-label">Concentration (lower = more spread out)</div>
-        <div class="insp-stat-row"><span class="dim">Symbol</span><span>${{r.symbol_concentration_pct}}%</span></div>
-        <div class="insp-stat-row"><span class="dim">Timeframe</span><span>${{r.timeframe_concentration_pct}}%</span></div>
-        <div class="insp-stat-row"><span class="dim">Indicator</span><span>${{r.indicator_concentration_pct}}%</span></div>
-        <div class="insp-stat-row"><span class="dim">Avg pairwise correlation</span><span>${{r.avg_pairwise_correlation ?? '--'}}</span></div>
+      <div class="insp-box" style="display:flex; align-items:center; gap:16px">
+        <div>
+          <div class="value ${{gradeClass(r.overall_grade)}}" style="font-size:40px; font-weight:700">${{r.overall_grade}}</div>
+          <div class="dim" style="font-size:11px">${{r.members}} strategies</div>
+        </div>
+        <div style="display:flex; flex:1; gap:8px; border-left:1px solid var(--border); padding-left:16px">
+          ${{badge('Concentration', r.sub_grades.concentration)}}
+          ${{badge('Size', r.sub_grades.size)}}
+          ${{badge('Exposure', r.sub_grades.exposure)}}
+          ${{badge('Correlation', r.sub_grades.correlation)}}
+        </div>
       </div>
       <div class="insp-box">
         <div class="insp-label">Combined</div>
         <div class="insp-stat-row"><span class="dim">Avg test return</span><span>${{r.combined_avg_test_return_pct}}%</span></div>
         <div class="insp-stat-row"><span class="dim">Worst test drawdown</span><span>${{r.combined_worst_test_dd_pct}}%</span></div>
+        <div class="insp-stat-row"><span class="dim">Avg pairwise correlation</span><span>${{r.avg_pairwise_correlation ?? '--'}}</span></div>
       </div>
+    </div>
+    <div class="insp-box" style="margin:0 16px 16px 16px">
+      <div class="insp-label">Bucket Breakdown <span class="dim">-- gaps here tell you which campaigns to run next</span></div>
+      ${{bucketBar('Symbol', r.buckets.symbol)}}
+      ${{bucketBar('Timeframe', r.buckets.timeframe)}}
+      ${{bucketBar('Indicator', r.buckets.indicator)}}
+      ${{bucketBar('Mechanism', r.buckets.mechanism)}}
     </div>
   `;
 }}
@@ -347,7 +375,7 @@ function closeInspector() {{
 function scoreGauge(fitness) {{
   // Normalize fitness (typically 0-4 range in this system) to a 0-100 "score"
   // the same way the reference dashboard shows a /100 gauge.
-  const score = Math.max(0, Math.min(100, Math.round(fitness * 22)));
+  const score = Math.max(0, Math.min(100, Math.round(fitness * 25)));
   const r = 38, circumference = 2 * Math.PI * r;
   const offset = circumference * (1 - score / 100);
   return `
