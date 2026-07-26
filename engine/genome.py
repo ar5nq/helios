@@ -12,7 +12,7 @@ import uuid
 
 INDICATORS = ["SMA", "EMA", "RSI", "MACD", "ATR", "BOLLINGER", "CCI", "WILLIAMS_R",
               "FVG", "OTE", "SMT", "ORDER_BLOCK", "LIQUIDITY_SWEEP", "SUPPORT_RESISTANCE",
-              "SUPPLY_DEMAND", "REJECTION_BLOCK"]
+              "SUPPLY_DEMAND", "REJECTION_BLOCK", "ORB", "ORB_CISD"]
 BIAS_MODES = ["HTF_TREND", "NONE", "TRAILING"]
 FILTER_MODES = ["NONE", "ATR_REGIME", "CHOP", "RSI_RANGE"]
 EXEC_MODES = ["FIXED_RR", "TRAILING_STOP", "ATR_STOP"]
@@ -27,7 +27,8 @@ INDICATOR_NAMES = {
     "FVG": "FVG Tap", "OTE": "OTE Retracement", "SMT": "SMT Divergence",
     "ORDER_BLOCK": "Order Block Tap", "LIQUIDITY_SWEEP": "Liquidity Sweep",
     "SUPPORT_RESISTANCE": "S/R Bounce", "SUPPLY_DEMAND": "Supply/Demand Zone",
-    "REJECTION_BLOCK": "Rejection Block Tap",
+    "REJECTION_BLOCK": "Rejection Block Tap", "ORB": "Opening Range Breakout",
+    "ORB_CISD": "ORB Liquidity Sweep + CISD",
 }
 BIAS_NAMES = {"HTF_TREND": "HTF", "TRAILING": "Trail", "NONE": None}
 FILTER_NAMES = {
@@ -64,6 +65,8 @@ INDICATOR_EXPLAIN = {
     "SUPPORT_RESISTANCE": "enters on a bounce/rejection at a recent swing-based support or resistance level",
     "SUPPLY_DEMAND": "enters when price returns to a consolidation zone that preceded a strong directional move -- a supply or demand zone",
     "REJECTION_BLOCK": "enters when price returns to tap a candle with an unusually long rejection wick -- betting the same rejection repeats",
+    "ORB": "enters when price breaks out of the opening range (8:12-9:12 ET by default)",
+    "ORB_CISD": "watches which side of the opening range's liquidity gets swept first, then enters the REVERSE direction once a CISD (Change in State of Delivery) confirms the reversal on the 5-minute chart",
 }
 BIAS_EXPLAIN = {
     "HTF_TREND": "only takes trades that agree with the direction of a higher-timeframe trend filter",
@@ -220,7 +223,7 @@ def crossover(a: dict, b: dict) -> dict:
         "signal_params": random.choice([a["signal_params"], b["signal_params"]]),
         "filter": random.choice([a["filter"], b["filter"]]),
         "exec_mode": random.choice([a["exec_mode"], b["exec_mode"]]),
-        "rr": round((a["rr"] + b["rr"]) / 2, 2),
+        "rr": random.choice([a["rr"], b["rr"]]),
         "generation": max(a.get("generation", 0), b.get("generation", 0)) + 1,
         "parents": [a["id"], b["id"]],
     }

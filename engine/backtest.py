@@ -371,6 +371,18 @@ def _raw_signal(df: pd.DataFrame, genome: dict, reference_df: pd.DataFrame = Non
         long = raw == 1
         short = raw == -1
 
+    elif indicator == "ORB":
+        from .orb import detect_orb_breakout
+        raw = detect_orb_breakout(df)
+        long = raw == 1
+        short = raw == -1
+
+    elif indicator == "ORB_CISD":
+        from .orb import detect_orb_liquidity_cisd
+        raw = detect_orb_liquidity_cisd(df)
+        long = raw == 1
+        short = raw == -1
+
     else:
         raise ValueError(f"Unknown signal_indicator: {indicator}")
 
