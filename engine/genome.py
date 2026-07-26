@@ -18,6 +18,37 @@ EXEC_MODES = ["FIXED_RR", "TRAILING_STOP", "ATR_STOP"]
 def _rid():
     return uuid.uuid4().hex[:6].upper()
 
+INDICATOR_NAMES = {
+    "SMA": "MA Cross", "EMA": "EMA Trend", "RSI": "RSI Reversal",
+    "MACD": "MACD Cross", "ATR": "Vol Breakout", "BOLLINGER": "Band Breakout",
+    "CCI": "CCI Reversion", "WILLIAMS_R": "Williams Reversion",
+}
+BIAS_NAMES = {"HTF_TREND": "HTF", "TRAILING": "Trail", "NONE": None}
+FILTER_NAMES = {
+    "ATR_REGIME": "Vol-Filtered", "CHOP": "Anti-Chop",
+    "RSI_RANGE": "RSI-Range", "NONE": None,
+}
+
+
+MECHANISM_NAMES = {
+    "FIXED_RR": "Fixed RR",
+    "TRAILING_STOP": "Trailing Runner",
+    "ATR_STOP": "Vol-Adaptive Stop",
+}
+
+
+def genome_mechanism(genome: dict) -> str:
+    return MECHANISM_NAMES.get(genome.get("exec_mode"), genome.get("exec_mode", "?"))
+
+
+def genome_label(genome: dict) -> str:
+    """Human-readable name built from what the strategy actually does,
+    e.g. 'RSI Reversal (HTF, Anti-Chop)' instead of a hex id."""
+    base = INDICATOR_NAMES.get(genome.get("signal_indicator"), genome.get("signal_indicator", "?"))
+    tags = [t for t in (BIAS_NAMES.get(genome.get("bias")), FILTER_NAMES.get(genome.get("filter"))) if t]
+    return f"{base} ({', '.join(tags)})" if tags else base
+
+
 def random_genome(symbol: str, timeframe: str) -> dict:
     return {
         "id": _rid(),

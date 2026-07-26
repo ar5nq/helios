@@ -193,9 +193,18 @@ def latest_signal(df: pd.DataFrame, genome: dict) -> dict:
     last = df.iloc[-1]
     # A genuinely traded bar almost never has zero intrabar range. A closed/stale
     # market (e.g. weekend futures close) often gets padded with a flat repeated
-    # price instead. Volume alone doesn't work here -- FX pairs from Yahoo report
-    # Volume=0 even while actively trading, so we check price range instead.
-    is_stale = bool(last["High"] == last["Low"] == last["Open"] == last["Close"])
+    # price instead. Volume alone doesn't work universally -- FX pairs from Yahoo
+    # report Volume=0 even while actively trading -- but for futures/index symbols
+    # (which DO report real volume), a market that's actually closed can still show
+    # a drifting "indicative" price with zero real volume behind it. So: check OHLC
+    # flatness always, and ALSO require real volume for symbols where volume is
+    # trustworthy.
+    is_flat = bool(last["High"] == last["Low"] == last["Open"] == last["Close"])
+    symbol = genome.get("symbol", "")
+    volume_reliable = symbol in ("NAS100", "US30", "XAUUSD")  # futures -- FX always reports 0
+    no_real_volume = volume_reliable and (pd.isna(last.get("Volume")) or last.get("Volume", 0) == 0)
+
+    is_stale = is_flat or no_real_volume
 
     if is_stale:
         return {
@@ -238,6 +247,15 @@ def latest_signal(df: pd.DataFrame, genome: dict) -> dict:
     }
 
 
+def _downsample(series: pd.Series, max_points: int = 80) -> list:
+    """Keeps the equity curve small enough to store in vault.json without
+    bloating it, while still showing the real shape of the curve."""
+    if len(series) <= max_points:
+        return [round(float(v), 4) for v in series]
+    step = max(1, len(series) // max_points)
+    return [round(float(v), 4) for v in series.iloc[::step]]
+
+
 def run_backtest(df: pd.DataFrame, genome: dict, train_frac: float = 0.7) -> dict:
     """Returns a dict of stats for TRAIN and TEST windows, plus a combined fitness score."""
     df = df.dropna().copy()
@@ -246,7 +264,7 @@ def run_backtest(df: pd.DataFrame, genome: dict, train_frac: float = 0.7) -> dic
 
     def score_window(window: pd.DataFrame) -> dict:
         if len(window) < 20:
-            return {"return_pct": 0.0, "max_dd_pct": 0.0, "win_rate": 0.0, "trades": 0}
+            return {"return_pct": 0.0, "max_dd_pct": 0.0, "win_rate": 0.0, "trades": 0, "equity_curve": []}
         sig = _signal_series(window, genome).shift(1).fillna(0)  # act on next bar
         rets = window["Close"].pct_change().fillna(0)
         strat_rets = sig * rets
@@ -265,6 +283,7 @@ def run_backtest(df: pd.DataFrame, genome: dict, train_frac: float = 0.7) -> dic
             "max_dd_pct": round(abs(drawdown) * 100, 2),
             "win_rate": round(100 * wins / total_signals, 1) if total_signals else 0.0,
             "trades": n_trades,
+            "equity_curve": _downsample(equity),
         }
 
     train_stats = score_window(train)
