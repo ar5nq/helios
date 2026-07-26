@@ -12,6 +12,14 @@ import json
 from engine.campaign import run_campaign
 from signals.signal_engine import emit_signal, genome_live_stats, list_signals, mark_taken, report_outcome
 from news.calendar_feed import fetch_week, high_impact_today, upcoming_by_color, format_alert, SYMBOL_TO_CURRENCIES
+from engine.risk import calculate_lot_size
+from engine.dashboard import build_and_open
+
+
+def _calc_rr(entry: float, stop: float, target: float) -> float:
+    risk = abs(entry - stop)
+    reward = abs(target - entry)
+    return round(reward / risk, 2) if risk else 0.0
 
 
 def main():
@@ -50,6 +58,16 @@ def main():
     respond.add_argument("--outcome", choices=["win", "loss", "be"],
                           help="how did it turn out -- win, loss, or breakeven (be)? "
                                "You can report this even if you skipped the trade (--taken no).")
+
+    lotsize = sub.add_parser("lotsize", help="calculate position size from account risk")
+    lotsize.add_argument("--account", type=float, required=True, help="account size, e.g. 5000")
+    lotsize.add_argument("--risk", type=float, required=True, help="% of account to risk, e.g. 1.0")
+    lotsize.add_argument("--entry", type=float, required=True)
+    lotsize.add_argument("--stop", type=float, required=True)
+    lotsize.add_argument("--point-value", type=float, default=1.0,
+                          help="$ per 1.0 price-unit move per 1.0 lot for YOUR broker (check contract specs)")
+
+    sub.add_parser("dashboard", help="generate and open the local vault/signals dashboard")
 
     args = parser.parse_args()
 
@@ -92,8 +110,9 @@ def main():
         for s in sigs:
             taken_str = {True: "TAKEN", False: "SKIPPED", None: "?"}[s["taken"]]
             outcome_str = s["outcome"] or "?"
+            rr = _calc_rr(s["entry"], s["stop"], s["target"])
             print(f"[{s['id']}] {s['direction']} {s['symbol']} ({s['timeframe']}) "
-                  f"entry={s['entry']} stop={s['stop']} target={s['target']} "
+                  f"entry={s['entry']} stop={s['stop']} target={s['target']} RR=1:{rr} "
                   f"| genome={s['genome_id']} | taken={taken_str} outcome={outcome_str}")
             if s.get("note"):
                 print(f"    note: {s['note']}")
@@ -108,6 +127,14 @@ def main():
             outcome_map = {"win": "WIN", "loss": "LOSS", "be": "BREAKEVEN"}
             report_outcome(args.signal_id, outcome_map[args.outcome])
         print(f"Updated signal {args.signal_id}.")
+
+    elif args.cmd == "lotsize":
+        result = calculate_lot_size(args.account, args.risk, args.entry, args.stop, args.point_value)
+        print(json.dumps(result, indent=2))
+
+    elif args.cmd == "dashboard":
+        path = build_and_open()
+        print(f"Dashboard generated at {path} and opened in your browser.")
 
 
 if __name__ == "__main__":
