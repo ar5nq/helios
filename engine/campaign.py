@@ -27,9 +27,16 @@ def _save_vault(vault: list):
         json.dump(vault, f, indent=2)
 
 
+def _genome_signature(g: dict) -> tuple:
+    """Identity based on actual strategy config, not the random id -- so we can
+    detect when the population has collapsed onto duplicates."""
+    return (g["bias"], g["signal_indicator"], tuple(sorted(g["signal_params"].items())),
+            g["filter"], g["exec_mode"], round(g["rr"], 1))
+
+
 def run_campaign(symbol: str, timeframe: str, population: int = 40,
                   generations: int = 5, survive_top: int = 10,
-                  fitness_gate: float = 1.0) -> dict:
+                  fitness_gate: float = 1.0, immigrant_frac: float = 0.3) -> dict:
     df = fetch(symbol, timeframe)
     pop = [random_genome(symbol, timeframe) for _ in range(population)]
 
@@ -44,27 +51,51 @@ def run_campaign(symbol: str, timeframe: str, population: int = 40,
             scored.append((g, result))
 
         scored.sort(key=lambda x: x[1]["fitness"], reverse=True)
-        top = scored[:survive_top]
+
+        # de-duplicate survivors by actual strategy config so identical clones
+        # don't fill up all 10 "survivor" slots
+        seen_signatures = set()
+        top = []
+        for g, r in scored:
+            sig = _genome_signature(g)
+            if sig in seen_signatures:
+                continue
+            seen_signatures.add(sig)
+            top.append((g, r))
+            if len(top) >= survive_top:
+                break
+
         history.append({
             "generation": gen + 1,
             "best_fitness": top[0][1]["fitness"] if top else None,
-            "survivors": len(top),
+            "unique_survivors": len(top),
         })
 
-        # breed next generation from top survivors
+        # breed next generation: keep unique elites, fill some slots with fresh
+        # random "immigrants" (new genetic material), rest via crossover/mutation
+        import random
         next_pop = [g for g, _ in top]
+        n_immigrants = max(1, int(population * immigrant_frac))
+        next_pop += [random_genome(symbol, timeframe) for _ in range(n_immigrants)]
+
         while len(next_pop) < population and top:
-            import random
             a, b = random.sample([g for g, _ in top], min(2, len(top)))
-            child = crossover(a, b) if a["id"] != b["id"] else mutate(a)
+            child = crossover(a, b) if a["id"] != b["id"] else mutate(a, rate=0.5)
             next_pop.append(child)
         pop = next_pop
 
-    # final vaulting: anything that cleared the fitness gate on the last run
+    # final vaulting: anything unique that cleared the fitness gate on the last run
     vault = _load_vault()
-    promoted = [r for g, r in scored if r["fitness"] >= fitness_gate]
-    for r in promoted:
-        genome = next(g for g, res in scored if res["genome_id"] == r["genome_id"])
+    seen_signatures = set()
+    promoted = []
+    for g, r in scored:
+        sig = _genome_signature(g)
+        if sig in seen_signatures or r["fitness"] < fitness_gate:
+            continue
+        seen_signatures.add(sig)
+        promoted.append((g, r))
+
+    for genome, r in promoted:
         vault.append({
             **genome,
             "score": r,
@@ -78,5 +109,5 @@ def run_campaign(symbol: str, timeframe: str, population: int = 40,
         "generations_run": generations,
         "history": history,
         "promoted_count": len(promoted),
-        "top_survivors": [r for g, r in scored[:survive_top]],
+        "top_survivors": [r for g, r in top],
     }

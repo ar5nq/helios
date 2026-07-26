@@ -17,7 +17,19 @@ def _rsi(series: pd.Series, period: int) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 
-def _signal_series(df: pd.DataFrame, genome: dict) -> pd.Series:
+def _atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    high, low, close = df["High"], df["Low"], df["Close"]
+    prev_close = close.shift(1)
+    tr = pd.concat([
+        high - low,
+        (high - prev_close).abs(),
+        (low - prev_close).abs(),
+    ], axis=1).max(axis=1)
+    return tr.rolling(period).mean()
+
+
+def _raw_signal(df: pd.DataFrame, genome: dict) -> pd.Series:
+    """The primary entry trigger, before bias/filter gating."""
     period = genome["signal_params"]["period"]
     threshold = genome["signal_params"]["threshold"]
     close = df["Close"]
@@ -31,7 +43,7 @@ def _signal_series(df: pd.DataFrame, genome: dict) -> pd.Series:
         long = close > ma
         short = close < ma
     else:
-        # generic momentum fallback for MACD/ATR/BOLLINGER/CCI/WILLIAMS_R placeholders
+        # generic momentum proxy for MACD/ATR/BOLLINGER/CCI/WILLIAMS_R
         mom = close.pct_change(period)
         long = mom > threshold * mom.std()
         short = mom < -threshold * mom.std()
@@ -42,18 +54,83 @@ def _signal_series(df: pd.DataFrame, genome: dict) -> pd.Series:
     return sig
 
 
+def _apply_bias(sig: pd.Series, df: pd.DataFrame, genome: dict) -> pd.Series:
+    """Bias gene: only allow signals that agree with a higher-timeframe trend
+    direction. This is what 'bias' is supposed to mean -- a macro trend filter
+    the entry signal has to agree with, not just cosmetic metadata."""
+    bias = genome.get("bias", "NONE")
+    close = df["Close"]
+
+    if bias == "HTF_TREND":
+        trend_ma = close.rolling(50).mean()
+        trend_up = close > trend_ma
+    elif bias == "TRAILING":
+        # trend defined by a slower-moving trailing average -- catches
+        # established trends rather than every short-term crossover
+        trend_ma = close.ewm(span=100).mean()
+        trend_up = close > trend_ma
+    else:  # NONE
+        return sig
+
+    gated = sig.copy()
+    gated[(sig == 1) & (~trend_up)] = 0
+    gated[(sig == -1) & (trend_up)] = 0
+    return gated
+
+
+def _apply_filter(sig: pd.Series, df: pd.DataFrame, genome: dict) -> pd.Series:
+    """Filter gene: a condition that must hold for a trade to be taken at all,
+    independent of direction (volatility regime, choppiness, RSI extremes)."""
+    filt = genome.get("filter", "NONE")
+    close = df["Close"]
+
+    if filt == "ATR_REGIME":
+        atr = _atr(df, 14)
+        allow = atr > atr.rolling(50).median()
+    elif filt == "CHOP":
+        volatility = close.pct_change().rolling(14).std()
+        allow = volatility < volatility.rolling(50).median()  # avoid choppy/sideways stretches
+    elif filt == "RSI_RANGE":
+        rsi = _rsi(close, 14)
+        allow = (rsi > 25) & (rsi < 75)  # avoid already-exhausted extremes
+    else:  # NONE
+        return sig
+
+    gated = sig.copy()
+    gated[~allow.fillna(False)] = 0
+    return gated
+
+
+def _signal_series(df: pd.DataFrame, genome: dict) -> pd.Series:
+    """Full signal pipeline: raw entry trigger -> bias gate -> filter gate.
+    All three genome genes now genuinely change trading behavior."""
+    sig = _raw_signal(df, genome)
+    sig = _apply_bias(sig, df, genome)
+    sig = _apply_filter(sig, df, genome)
+    return sig
+
+
 def latest_signal(df: pd.DataFrame, genome: dict) -> dict:
     """Returns the signal direction on the most recent completed bar, plus
-    a simple entry/stop/target using the genome's risk:reward ratio.
+    entry/stop/target sized according to the genome's exec_mode and risk:reward.
     Used by the live runner to decide whether to emit a new signal."""
     df = df.dropna()
     sig = _signal_series(df, genome)
     direction_code = int(sig.iloc[-1])
     close = float(df["Close"].iloc[-1])
 
-    # simple volatility proxy: recent ATR-ish range, used to size stop distance
-    recent_range = float((df["High"] - df["Low"]).tail(14).mean())
-    stop_distance = max(recent_range, close * 0.002)  # floor so it's never zero
+    exec_mode = genome.get("exec_mode", "FIXED_RR")
+    atr = float(_atr(df, 14).iloc[-1]) if len(df) > 14 else close * 0.002
+
+    if exec_mode == "ATR_STOP":
+        stop_distance = max(atr, close * 0.001)
+    elif exec_mode == "TRAILING_STOP":
+        # trailing stops are typically given more room than a hard fixed stop
+        stop_distance = max(atr * 1.5, close * 0.002)
+    else:  # FIXED_RR
+        recent_range = float((df["High"] - df["Low"]).tail(14).mean())
+        stop_distance = max(recent_range, close * 0.002)
+
     rr = genome.get("rr", 1.5)
 
     if direction_code == 1:
