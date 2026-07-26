@@ -1,0 +1,50 @@
+"""
+Pulls historical OHLC data for backtesting.
+Uses yfinance (free, no API key) -- good enough for FX majors, gold, indices.
+Maps human-friendly symbols (XAUUSD, GBPJPY, US30) to Yahoo tickers.
+"""
+import yfinance as yf
+import pandas as pd
+
+SYMBOL_MAP = {
+    "XAUUSD": "GC=F",
+    "US30": "^DJI",
+    "NAS100": "^NDX",
+    "GBPJPY": "GBPJPY=X",
+    "GBPUSD": "GBPUSD=X",
+    "USDJPY": "JPY=X",
+    "EURUSD": "EURUSD=X",
+    "EURGBP": "EURGBP=X",
+    "AUDUSD": "AUDUSD=X",
+    "USDCAD": "CAD=X",
+}
+
+TF_MAP = {
+    "M15": ("60d", "15m"),
+    "M30": ("60d", "30m"),
+    "H1": ("730d", "1h"),
+    "H2": ("730d", "1h"),   # yfinance has no native H2; resampled from H1
+    "H4": ("730d", "1h"),   # resampled from H1
+    "D1": ("5y", "1d"),
+}
+
+
+def fetch(symbol: str, timeframe: str) -> pd.DataFrame:
+    ticker = SYMBOL_MAP.get(symbol)
+    if ticker is None:
+        raise ValueError(f"Unknown symbol: {symbol}")
+    period, interval = TF_MAP.get(timeframe, ("1y", "1d"))
+
+    df = yf.download(ticker, period=period, interval=interval, progress=False, auto_adjust=True)
+    if df.empty:
+        raise ValueError(f"No data returned for {symbol} ({ticker})")
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
+    if timeframe in ("H2", "H4") and interval == "1h":
+        rule = "2h" if timeframe == "H2" else "4h"
+        df = df.resample(rule).agg({
+            "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
+        }).dropna()
+
+    return df
