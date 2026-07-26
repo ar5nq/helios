@@ -36,7 +36,8 @@ def _genome_signature(g: dict) -> tuple:
 
 def run_campaign(symbol: str, timeframe: str, population: int = 40,
                   generations: int = 5, survive_top: int = 10,
-                  fitness_gate: float = 1.0, immigrant_frac: float = 0.3) -> dict:
+                  fitness_gate: float = 1.0, immigrant_frac: float = 0.3,
+                  min_test_trades: int = 25) -> dict:
     df = fetch(symbol, timeframe)
     pop = [random_genome(symbol, timeframe) for _ in range(population)]
 
@@ -84,13 +85,22 @@ def run_campaign(symbol: str, timeframe: str, population: int = 40,
             next_pop.append(child)
         pop = next_pop
 
-    # final vaulting: anything unique that cleared the fitness gate on the last run
+    # final vaulting: anything unique that cleared BOTH the fitness gate and the
+    # minimum out-of-sample trade count. A high fitness on <25 test trades is
+    # usually a small-sample coincidence, not a real edge (see the H4 case where
+    # 10 test trades produced a suspiciously clean 83% win rate).
     vault = _load_vault()
     seen_signatures = set()
     promoted = []
+    rejected_thin_sample = 0
     for g, r in scored:
         sig = _genome_signature(g)
-        if sig in seen_signatures or r["fitness"] < fitness_gate:
+        if sig in seen_signatures:
+            continue
+        if r["test"]["trades"] < min_test_trades:
+            rejected_thin_sample += 1
+            continue
+        if r["fitness"] < fitness_gate:
             continue
         seen_signatures.add(sig)
         promoted.append((g, r))
@@ -109,5 +119,6 @@ def run_campaign(symbol: str, timeframe: str, population: int = 40,
         "generations_run": generations,
         "history": history,
         "promoted_count": len(promoted),
+        "rejected_thin_sample": rejected_thin_sample,
         "top_survivors": [r for g, r in top],
     }

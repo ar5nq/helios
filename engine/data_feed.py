@@ -20,6 +20,9 @@ SYMBOL_MAP = {
 }
 
 TF_MAP = {
+    "M1": ("7d", "1m"),     # Yahoo hard-limits 1m data to the last 7 days -- no way around this
+    "M3": ("7d", "1m"),     # resampled from 1m; same 7-day ceiling as M1
+    "M5": ("60d", "5m"),
     "M15": ("60d", "15m"),
     "M30": ("60d", "30m"),
     "H1": ("730d", "1h"),
@@ -40,6 +43,11 @@ def fetch(symbol: str, timeframe: str) -> pd.DataFrame:
         raise ValueError(f"No data returned for {symbol} ({ticker})")
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
+
+    if timeframe == "M3" and interval == "1m":
+        df = df.resample("3min").agg({
+            "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
+        }).dropna()
 
     if timeframe in ("H2", "H4") and interval == "1h":
         rule = "2h" if timeframe == "H2" else "4h"
