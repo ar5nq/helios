@@ -11,7 +11,7 @@ import json
 
 from engine.campaign import run_campaign
 from signals.signal_engine import emit_signal, genome_live_stats, list_signals, mark_taken, report_outcome
-from news.calendar_feed import fetch_week, high_impact_today, upcoming_by_color, format_alert
+from news.calendar_feed import fetch_week, high_impact_today, upcoming_by_color, format_alert, SYMBOL_TO_CURRENCIES
 
 
 def main():
@@ -38,6 +38,7 @@ def main():
                        help="only show today's events (default: rest of this week)")
     news.add_argument("--color", choices=["red", "orange", "yellow"], default="red",
                        help="red=High only (default), orange=Medium+High, yellow=Low+Medium+High")
+    news.add_argument("--symbol", help="only show news relevant to this symbol, e.g. NAS100")
 
     signals_cmd = sub.add_parser("signals", help="list pending signals waiting for your response")
     signals_cmd.add_argument("--all", action="store_true", help="show every signal, not just pending ones")
@@ -63,12 +64,21 @@ def main():
 
     elif args.cmd == "news":
         events = fetch_week()
+        currencies = None
+        if args.symbol:
+            currencies = SYMBOL_TO_CURRENCIES.get(args.symbol.upper())
+            if currencies is None:
+                print(f"Unknown symbol '{args.symbol}'. Known: {', '.join(SYMBOL_TO_CURRENCIES)}")
+                return
+
         if args.today:
-            alerts = high_impact_today(events)
+            alerts = high_impact_today(events, currencies=currencies)
             label = "today"
         else:
-            alerts = upcoming_by_color(events, color=args.color)
+            alerts = upcoming_by_color(events, color=args.color, currencies=currencies)
             label = f"this week ({args.color} and above)"
+        if args.symbol:
+            label += f" for {args.symbol.upper()}"
 
         if not alerts:
             print(f"No matching events {label}.")

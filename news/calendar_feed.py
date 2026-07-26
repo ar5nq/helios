@@ -15,6 +15,21 @@ FF_WEEK_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 
 IMPACT_RANK = {"High": 3, "Medium": 2, "Low": 1, "Holiday": 0}
 
+# Which currencies actually move each symbol -- so you can filter news to
+# just what matters for what you trade, not every country's calendar.
+SYMBOL_TO_CURRENCIES = {
+    "NAS100": ["USD"],
+    "US30": ["USD"],
+    "XAUUSD": ["USD"],   # gold's primary driver is USD rates/Fed policy
+    "GBPJPY": ["GBP", "JPY"],
+    "GBPUSD": ["GBP", "USD"],
+    "USDJPY": ["USD", "JPY"],
+    "EURUSD": ["EUR", "USD"],
+    "EURGBP": ["EUR", "GBP"],
+    "AUDUSD": ["AUD", "USD"],
+    "USDCAD": ["USD", "CAD"],
+}
+
 
 def fetch_week() -> list:
     resp = requests.get(FF_WEEK_URL, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
