@@ -42,6 +42,36 @@ def _signal_series(df: pd.DataFrame, genome: dict) -> pd.Series:
     return sig
 
 
+def latest_signal(df: pd.DataFrame, genome: dict) -> dict:
+    """Returns the signal direction on the most recent completed bar, plus
+    a simple entry/stop/target using the genome's risk:reward ratio.
+    Used by the live runner to decide whether to emit a new signal."""
+    df = df.dropna()
+    sig = _signal_series(df, genome)
+    direction_code = int(sig.iloc[-1])
+    close = float(df["Close"].iloc[-1])
+
+    # simple volatility proxy: recent ATR-ish range, used to size stop distance
+    recent_range = float((df["High"] - df["Low"]).tail(14).mean())
+    stop_distance = max(recent_range, close * 0.002)  # floor so it's never zero
+    rr = genome.get("rr", 1.5)
+
+    if direction_code == 1:
+        direction, stop, target = "BUY", close - stop_distance, close + stop_distance * rr
+    elif direction_code == -1:
+        direction, stop, target = "SELL", close + stop_distance, close - stop_distance * rr
+    else:
+        direction, stop, target = None, None, None
+
+    return {
+        "direction": direction,
+        "entry": round(close, 5) if direction else None,
+        "stop": round(stop, 5) if direction else None,
+        "target": round(target, 5) if direction else None,
+        "bar_time": str(df.index[-1]),
+    }
+
+
 def run_backtest(df: pd.DataFrame, genome: dict, train_frac: float = 0.7) -> dict:
     """Returns a dict of stats for TRAIN and TEST windows, plus a combined fitness score."""
     df = df.dropna().copy()

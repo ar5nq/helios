@@ -59,14 +59,40 @@ The genome/backtest/campaign logic is identical to what an MT5-export version wo
 the only thing removed is auto-execution. Signals are advisory: you take them or skip them,
 and report the real outcome, which is what keeps the live win-rate honest.
 
+## Live runner + Telegram alerts
+
+Once you've bred some genomes into `data/vault.json`, run the live runner to have it
+watch prices and alert you on Telegram when a genome's condition fires:
+
+```bash
+# one-time Telegram setup: see notifications/README.md
+export TELEGRAM_BOT_TOKEN="..."
+export TELEGRAM_CHAT_ID="..."
+
+python -m engine.live_runner
+```
+
+It polls every 15 minutes by default (`POLL_SECONDS` in `engine/live_runner.py`), checks
+each vaulted genome against the newest bar, and:
+- fires at most once per genome per new bar (tracked in `data/runner_state.json`, so
+  restarting the script won't spam duplicate alerts)
+- logs every fired signal to `data/signal_log.json` via `signals/signal_engine.py`
+- also checks ForexFactory's calendar once per cycle and alerts on new high-impact events
+
+You still decide whether to take each signal, and report the outcome yourself:
+```python
+from signals.signal_engine import mark_taken, report_outcome
+mark_taken("SIGNAL_ID", True)
+report_outcome("SIGNAL_ID", "WIN")  # or "LOSS" / "BREAKEVEN"
+```
+
 ## Roadmap (not yet built)
-- [ ] Live genome runner: poll `data_feed` on a schedule and auto-call `emit_signal` when a
-      vaulted genome's rule condition fires on the newest bar (cron / APScheduler)
-  - [ ] Push/SMS/Telegram delivery for new signals and news alerts
 - [ ] Dashboard (the UI in your screenshots) as a small Flask/FastAPI + React app reading from
       `data/vault.json` and `data/signal_log.json`
 - [ ] Portfolio correlation grid (group vaulted genomes, screen for low return correlation)
 - [ ] Swap `data/*.json` for SQLite once signal volume grows
+- [ ] Run the live runner as a background service (launchd on Mac / systemd on Linux) instead
+      of a script you have to leave running in a terminal window
 
 ## Data source caveats
 - `yfinance` has no official SLA; if Yahoo changes its endpoint this breaks and needs a patch.

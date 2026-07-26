@@ -1,0 +1,4 @@
+This folder holds generated runtime data (vault.json, signal_log.json, runner_state.json).
+Those files are gitignored on purpose -- they're your live trading data, not source code,
+and will look different for everyone running this. This .gitkeep just keeps the folder
+present in a fresh clone.

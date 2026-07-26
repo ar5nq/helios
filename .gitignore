@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 venv/
 .env
+data/vault.json
+data/signal_log.json
+data/runner_state.json
