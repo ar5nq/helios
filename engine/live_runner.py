@@ -42,11 +42,21 @@ def _save_json(path, obj):
 
 
 def check_genomes_once(notify: bool = True) -> list:
-    """Runs one pass over the vault. Returns any new signals fired."""
+    """Runs one pass over the vault. Returns any new signals fired.
+
+    Multiple vaulted genomes can have different DNA but happen to trade
+    identically on this data (e.g. a filter gene that never actually
+    binds on this window) -- see the M5/H1 batches where several distinct
+    genome ids had byte-identical backtest stats. Left ungrouped, that
+    produces 4+ near-duplicate Telegram alerts for what is functionally
+    one trade idea. So: group same-bar fires by (symbol, timeframe,
+    direction, rounded entry) and send ONE alert per group, listing every
+    genome id that agreed."""
     vault = _load_json(VAULT_PATH, [])
     state = _load_json(STATE_PATH, {"last_bar_alerted": {}, "news_alerted": []})
     fired = []
 
+    candidates = []  # (entry_dict, sig_dict) pairs that fired this cycle
     for entry in vault:
         genome_id = entry["id"]
         symbol, timeframe = entry["symbol"], entry["timeframe"]
@@ -57,6 +67,9 @@ def check_genomes_once(notify: bool = True) -> list:
             print(f"[warn] failed to check genome {genome_id}: {traceback.format_exc()}")
             continue
 
+        if sig["is_stale"]:
+            continue  # market closed / no real trading in this bar -- don't fire on dead data
+
         if sig["direction"] is None:
             continue
 
@@ -64,17 +77,39 @@ def check_genomes_once(notify: bool = True) -> list:
         if already_alerted:
             continue
 
+        candidates.append((entry, sig))
+
+    # group by what the trade actually looks like, not by which genome found it
+    groups = {}
+    for entry, sig in candidates:
+        key = (entry["symbol"], entry["timeframe"], sig["direction"], round(sig["entry"], 2))
+        groups.setdefault(key, []).append((entry, sig))
+
+    for (symbol, timeframe, direction, entry_price), members in groups.items():
+        # pick the highest-fitness genome in the group as the representative
+        # for stop/target sizing (their sig dicts may differ slightly on
+        # stop distance depending on exec_mode)
+        members.sort(key=lambda m: m[0].get("score", {}).get("fitness", 0), reverse=True)
+        rep_entry, rep_sig = members[0]
+        genome_ids = [e["id"] for e, _ in members]
+
         signal = emit_signal(
-            genome_id=genome_id, symbol=symbol, timeframe=timeframe,
-            direction=sig["direction"], entry=sig["entry"],
-            stop=sig["stop"], target=sig["target"],
+            genome_id=rep_entry["id"], symbol=symbol, timeframe=timeframe,
+            direction=direction, entry=rep_sig["entry"],
+            stop=rep_sig["stop"], target=rep_sig["target"],
+            note=f"confirmed by {len(genome_ids)} genome(s): {', '.join(genome_ids)}" if len(genome_ids) > 1 else "",
         )
         fired.append(signal)
-        state["last_bar_alerted"][genome_id] = sig["bar_time"]
+
+        for e, s in members:
+            state["last_bar_alerted"][e["id"]] = s["bar_time"]
 
         if notify:
             try:
-                send_message(format_signal_message(signal))
+                msg = format_signal_message(signal)
+                if len(genome_ids) > 1:
+                    msg += f"\n(agreed by {len(genome_ids)} vaulted genomes)"
+                send_message(msg)
             except Exception as e:
                 print(f"[warn] telegram send failed: {e}")
 

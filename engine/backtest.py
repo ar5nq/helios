@@ -175,8 +175,26 @@ def _signal_series(df: pd.DataFrame, genome: dict) -> pd.Series:
 def latest_signal(df: pd.DataFrame, genome: dict) -> dict:
     """Returns the signal direction on the most recent completed bar, plus
     entry/stop/target sized according to the genome's exec_mode and risk:reward.
-    Used by the live runner to decide whether to emit a new signal."""
+    Used by the live runner to decide whether to emit a new signal.
+
+    Returns direction=None (and is_stale=True) if the latest bar shows no real
+    trading activity -- Yahoo can keep stamping a fresh-looking timestamp on
+    the last row even while a market (e.g. weekend futures close) is shut,
+    so a new bar_time alone isn't proof anything actually happened."""
     df = df.dropna()
+    last = df.iloc[-1]
+    # A genuinely traded bar almost never has zero intrabar range. A closed/stale
+    # market (e.g. weekend futures close) often gets padded with a flat repeated
+    # price instead. Volume alone doesn't work here -- FX pairs from Yahoo report
+    # Volume=0 even while actively trading, so we check price range instead.
+    is_stale = bool(last["High"] == last["Low"] == last["Open"] == last["Close"])
+
+    if is_stale:
+        return {
+            "direction": None, "entry": None, "stop": None, "target": None,
+            "bar_time": str(df.index[-1]), "is_stale": True,
+        }
+
     sig = _signal_series(df, genome)
     direction_code = int(sig.iloc[-1])
     close = float(df["Close"].iloc[-1])
@@ -208,6 +226,7 @@ def latest_signal(df: pd.DataFrame, genome: dict) -> dict:
         "stop": round(stop, 5) if direction else None,
         "target": round(target, 5) if direction else None,
         "bar_time": str(df.index[-1]),
+        "is_stale": False,
     }
 
 

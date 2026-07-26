@@ -11,6 +11,9 @@ One-time setup (you do this once, in the Telegram app):
 import os
 from typing import Optional
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()  # reads .env in the project root, if present
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
 
