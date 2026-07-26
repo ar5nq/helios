@@ -8,8 +8,11 @@ import pandas as pd
 
 SYMBOL_MAP = {
     "XAUUSD": "GC=F",
-    "US30": "^DJI",
-    "NAS100": "^NDX",
+    "US30": "YM=F",     # Dow futures -- trades Asia/London/NY like a real US30 CFD
+    "NAS100": "NQ=F",   # Nasdaq-100 FUTURES, not ^NDX -- ^NDX only updates during
+                        # NYSE cash hours (9:30am-4pm ET); NQ=F trades nearly
+                        # 24hrs/day Sun evening-Fri evening, matching what
+                        # brokers actually quote as "NAS100"
     "GBPJPY": "GBPJPY=X",
     "GBPUSD": "GBPUSD=X",
     "USDJPY": "JPY=X",
