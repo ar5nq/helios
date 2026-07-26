@@ -173,15 +173,23 @@ def _signal_series(df: pd.DataFrame, genome: dict) -> pd.Series:
 
 
 def latest_signal(df: pd.DataFrame, genome: dict) -> dict:
-    """Returns the signal direction on the most recent completed bar, plus
-    entry/stop/target sized according to the genome's exec_mode and risk:reward.
+    """Returns the signal direction on the most recent CONFIRMED (closed) bar,
+    plus entry/stop/target sized according to the genome's exec_mode and rr.
     Used by the live runner to decide whether to emit a new signal.
 
-    Returns direction=None (and is_stale=True) if the latest bar shows no real
-    trading activity -- Yahoo can keep stamping a fresh-looking timestamp on
-    the last row even while a market (e.g. weekend futures close) is shut,
-    so a new bar_time alone isn't proof anything actually happened."""
+    Deliberately drops the very last row before deciding anything: intraday
+    feeds (including this one, right at a weekly market reopen) often return
+    a still-forming candle as the last row, whose values can keep shifting
+    between polls -- evaluating it causes duplicate/unstable signals. Trading
+    systems generally only act on bars that have actually closed."""
     df = df.dropna()
+    if len(df) < 2:
+        return {
+            "direction": None, "entry": None, "stop": None, "target": None,
+            "bar_time": None, "is_stale": True,
+        }
+    df = df.iloc[:-1]  # drop the still-forming candle; work only with closed bars
+
     last = df.iloc[-1]
     # A genuinely traded bar almost never has zero intrabar range. A closed/stale
     # market (e.g. weekend futures close) often gets padded with a flat repeated
