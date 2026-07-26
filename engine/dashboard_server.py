@@ -14,8 +14,9 @@ import webbrowser
 
 from flask import Flask, jsonify, request
 
-from .genome import genome_label, genome_mechanism
+from .genome import genome_label, genome_mechanism, explain_genome
 from .portfolio import analyze_portfolio
+from .active_strategies import get_active, activate, deactivate
 from .risk import calculate_lot_size, load_account
 from signals.signal_engine import list_signals, mark_taken, report_outcome
 
@@ -57,6 +58,8 @@ def index():
 
     labels = {g["id"]: genome_label(g) for g in vault}
     mechanisms = {g["id"]: genome_mechanism(g) for g in vault}
+    explanations = {g["id"]: explain_genome(g) for g in vault}
+    active_ids = get_active()
     for s in signals:
         s["_lot"] = _lot_size_for(s)
         s["_label"] = labels.get(s["genome_id"], s["genome_id"])
@@ -65,6 +68,8 @@ def index():
     signals_json = json.dumps(signals)
     labels_json = json.dumps(labels)
     mechanisms_json = json.dumps(mechanisms)
+    active_json = json.dumps(active_ids)
+    explanations_json = json.dumps(explanations)
 
     return f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Helios // Strategy Vault</title>
@@ -167,6 +172,8 @@ const vault = {vault_json};
 let signals = {signals_json};
 const labels = {labels_json};
 const mechanisms = {mechanisms_json};
+let activeIds = {active_json};
+const explanations = {explanations_json};
 
 function calcRR(entry, stop, target) {{
   const risk = Math.abs(entry - stop);
@@ -234,6 +241,7 @@ function renderVault() {{
   let rows = vault.map(g => {{
     const score = g.score || {{}};
     const test = score.test || {{}};
+    const isLive = activeIds.includes(g.id);
     return `<tr class="vault-row" onclick="openInspector('${{g.id}}')">
       <td onclick="event.stopPropagation()"><input type="checkbox" class="portfolio-check" value="${{g.id}}"></td>
       <td class="dim">${{g.id}}</td>
@@ -244,12 +252,26 @@ function renderVault() {{
       <td>${{test.max_dd_pct ?? '--'}}%</td>
       <td>${{test.win_rate ?? '--'}}%</td>
       <td class="dim">${{test.trades ?? '--'}}</td>
+      <td onclick="event.stopPropagation()">
+        <button class="btn ${{isLive ? 'active-yes' : ''}}" onclick="toggleActive('${{g.id}}')">${{isLive ? 'LIVE' : 'off'}}</button>
+      </td>
     </tr>`;
   }}).join('');
   el.innerHTML = `<table><tr>
     <th></th><th>ID</th><th>Symbol</th><th>Strategy</th><th>Fitness</th>
-    <th>Test Ret</th><th>Test DD</th><th>Win Rate</th><th>Trades</th>
+    <th>Test Ret</th><th>Test DD</th><th>Win Rate</th><th>Trades</th><th>Live?</th>
   </tr>${{rows}}</table>`;
+}}
+
+async function toggleActive(genomeId) {{
+  const endpoint = activeIds.includes(genomeId) ? '/api/deactivate' : '/api/activate';
+  const resp = await fetch(endpoint, {{
+    method: 'POST', headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{genome_id: genomeId}})
+  }});
+  const r = await resp.json();
+  activeIds = r.active;
+  renderVault();
 }}
 
 async function buildPortfolio() {{
@@ -361,6 +383,10 @@ function openInspector(genomeId) {{
       </div>
     </div>
     <div class="insp-box" style="margin:0 16px 16px 16px">
+      <div class="insp-label">What this strategy actually does</div>
+      <div style="font-size:12px; line-height:1.6">${{explanations[g.id] || 'No explanation available.'}}</div>
+    </div>
+    <div class="insp-box" style="margin:0 16px 16px 16px">
       <div class="insp-label">Equity Curve <span class="dim">(gray = train/in-sample, red = test/out-of-sample -- the honest part)</span></div>
       <canvas id="equity-canvas" width="900" height="180" style="width:100%; height:180px;"></canvas>
     </div>
@@ -376,6 +402,20 @@ renderSignals();
 renderVault();
 </script>
 </body></html>"""
+
+
+@app.route("/api/activate", methods=["POST"])
+def api_activate():
+    genome_id = request.get_json()["genome_id"]
+    result = activate(genome_id)
+    return jsonify({"active": result})
+
+
+@app.route("/api/deactivate", methods=["POST"])
+def api_deactivate():
+    genome_id = request.get_json()["genome_id"]
+    result = deactivate(genome_id)
+    return jsonify({"active": result})
 
 
 @app.route("/api/portfolio", methods=["POST"])

@@ -8,12 +8,15 @@ Examples:
 """
 import argparse
 import json
+import os
 
 from engine.campaign import run_campaign
 from signals.signal_engine import emit_signal, genome_live_stats, list_signals, mark_taken, report_outcome
 from news.calendar_feed import fetch_week, high_impact_today, upcoming_by_color, format_alert, SYMBOL_TO_CURRENCIES
 from engine.risk import calculate_lot_size, save_account, load_account
 from engine.dashboard_server import build_and_open
+from engine.active_strategies import get_active, activate, deactivate
+from engine.genome import explain_genome
 
 
 def _calc_rr(entry: float, stop: float, target: float) -> float:
@@ -76,6 +79,17 @@ def main():
                           help="set point value for a symbol, e.g. --point-value NAS100 1.0 (repeatable)")
 
     sub.add_parser("dashboard", help="generate and open the local vault/signals dashboard")
+
+    activate_cmd = sub.add_parser("activate", help="turn ON live signals for a strategy")
+    activate_cmd.add_argument("genome_id")
+
+    deactivate_cmd = sub.add_parser("deactivate", help="turn OFF live signals for a strategy")
+    deactivate_cmd.add_argument("genome_id")
+
+    sub.add_parser("active", help="list which strategies are currently live")
+
+    explain_cmd = sub.add_parser("explain", help="plain-English breakdown of a strategy")
+    explain_cmd.add_argument("genome_id")
 
     args = parser.parse_args()
 
@@ -184,6 +198,34 @@ def main():
 
     elif args.cmd == "dashboard":
         build_and_open()
+
+    elif args.cmd == "activate":
+        result = activate(args.genome_id)
+        print(f"Activated. Currently live: {result}")
+
+    elif args.cmd == "deactivate":
+        result = deactivate(args.genome_id)
+        print(f"Deactivated. Currently live: {result}")
+
+    elif args.cmd == "active":
+        result = get_active()
+        if not result:
+            print("No strategies activated -- the live runner will stay silent until you activate some.")
+        else:
+            print("Live strategies:", result)
+
+    elif args.cmd == "explain":
+        vault_path = os.path.join("data", "vault.json")
+        if not os.path.exists(vault_path):
+            print("No vault found yet -- breed some strategies first.")
+            return
+        with open(vault_path) as f:
+            vault = json.load(f)
+        match = next((g for g in vault if g["id"] == args.genome_id), None)
+        if not match:
+            print(f"No strategy found with id {args.genome_id}")
+            return
+        print(explain_genome(match))
 
 
 if __name__ == "__main__":

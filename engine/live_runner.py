@@ -19,6 +19,7 @@ import traceback
 from .data_feed import fetch
 from .backtest import latest_signal
 from .killzones import current_killzone, is_in_any_killzone
+from .active_strategies import get_active
 from signals.signal_engine import emit_signal
 from news.calendar_feed import fetch_week, high_impact_today, format_alert
 from notifications.telegram import send_message, format_signal_message, format_news_message
@@ -60,6 +61,12 @@ def check_genomes_once(notify: bool = True) -> list:
 
     if ENFORCE_KILLZONES and not is_in_any_killzone():
         return fired  # outside Asian/London/NY session windows -- don't fire
+
+    active_ids = set(get_active())
+    if not active_ids:
+        return fired  # nothing activated yet -- stay silent rather than fire everything at once
+
+    vault = [g for g in vault if g["id"] in active_ids]
 
     candidates = []  # (entry_dict, sig_dict) pairs that fired this cycle
     for entry in vault:

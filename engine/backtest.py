@@ -28,6 +28,72 @@ def _atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     return tr.rolling(period).mean()
 
 
+def _detect_fvg_signal(df: pd.DataFrame, lookback: int = 20) -> pd.Series:
+    """ICT Fair Value Gap: a bullish FVG is a 3-candle imbalance where
+    candle[i-2].High < candle[i].Low (price left a gap on the way up).
+    Bearish is the mirror. A gap usually isn't tapped on the same bar it
+    forms -- price fills it on some LATER bar -- so we track open gaps and
+    check every subsequent bar within `lookback` for a tap back into one."""
+    high, low, close = df["High"], df["Low"], df["Close"]
+    sig = pd.Series(0, index=df.index)
+
+    bull_gaps = []  # list of (formed_at_index, bottom, top)
+    bear_gaps = []
+
+    for i in range(2, len(df)):
+        # a new bullish gap forms using candles (i-2, i-1, i)
+        if high.iloc[i - 2] < low.iloc[i]:
+            bull_gaps.append((i, high.iloc[i - 2], low.iloc[i]))
+        if low.iloc[i - 2] > high.iloc[i]:
+            bear_gaps.append((i, high.iloc[i], low.iloc[i - 2]))
+
+        # drop gaps too old to matter
+        bull_gaps = [g for g in bull_gaps if i - g[0] <= lookback]
+        bear_gaps = [g for g in bear_gaps if i - g[0] <= lookback]
+
+        # check if the CURRENT close taps into any open gap (but not the
+        # bar it was formed on, since that's the impulse move itself)
+        c = close.iloc[i]
+        for formed_at, bottom, top in bull_gaps:
+            if formed_at != i and bottom <= c <= top:
+                sig.iloc[i] = 1
+                break
+        if sig.iloc[i] == 0:
+            for formed_at, bottom, top in bear_gaps:
+                if formed_at != i and bottom <= c <= top:
+                    sig.iloc[i] = -1
+                    break
+
+    return sig
+
+
+def _detect_ote_signal(df: pd.DataFrame, swing_window: int = 20) -> pd.Series:
+    """ICT Optimal Trade Entry: find the most recent swing (rolling high to
+    rolling low, or vice versa) and check if price has retraced into the
+    61.8%-79% Fibonacci zone of that swing -- the 'OTE zone' -- while the
+    swing direction is still intact."""
+    high, low, close = df["High"], df["Low"], df["Close"]
+    swing_high = high.rolling(swing_window).max()
+    swing_low = low.rolling(swing_window).min()
+    swing_range = swing_high - swing_low
+
+    # if the swing's high came after its low, it's an up-swing (retracement = pullback down into OTE for a long)
+    up_swing = high.rolling(swing_window).apply(lambda w: w.argmax(), raw=True) > \
+        low.rolling(swing_window).apply(lambda w: w.argmin(), raw=True)
+
+    ote_top_long = swing_high - swing_range * 0.618
+    ote_bottom_long = swing_high - swing_range * 0.79
+    ote_top_short = swing_low + swing_range * 0.79
+    ote_bottom_short = swing_low + swing_range * 0.618
+
+    sig = pd.Series(0, index=df.index)
+    long_zone = (close <= ote_top_long) & (close >= ote_bottom_long) & up_swing
+    short_zone = (close >= ote_bottom_short) & (close <= ote_top_short) & (~up_swing)
+    sig[long_zone.fillna(False)] = 1
+    sig[short_zone.fillna(False)] = -1
+    return sig
+
+
 def _macd_line(close: pd.Series, period: int) -> tuple:
     fast = max(2, period // 2)
     slow = period
@@ -106,6 +172,16 @@ def _raw_signal(df: pd.DataFrame, genome: dict) -> pd.Series:
         overbought = -20 + threshold * 15
         long = wr < oversold
         short = wr > overbought
+
+    elif indicator == "FVG":
+        raw = _detect_fvg_signal(df)
+        long = raw == 1
+        short = raw == -1
+
+    elif indicator == "OTE":
+        raw = _detect_ote_signal(df, swing_window=max(10, period))
+        long = raw == 1
+        short = raw == -1
 
     else:
         raise ValueError(f"Unknown signal_indicator: {indicator}")
