@@ -7,6 +7,7 @@ this needs updating.
 Also flags "high impact" events the same way Financial Juice-style alert
 tools do, so you get a heads-up before news that could blow out a signal.
 """
+from typing import Optional, List
 import requests
 from datetime import datetime, timezone
 
@@ -21,7 +22,7 @@ def fetch_week() -> list:
     return resp.json()
 
 
-def high_impact_today(events: list, currencies: list[str] | None = None) -> list:
+def high_impact_today(events: list, currencies: Optional[List[str]] = None) -> list:
     today = datetime.now(timezone.utc).date()
     out = []
     for e in events:

@@ -9,12 +9,13 @@ One-time setup (you do this once, in the Telegram app):
   4. Put both in a .env file (see .env.example) -- never commit real secrets to git
 """
 import os
+from typing import Optional
 import requests
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
 
 
-def send_message(text: str, token: str | None = None, chat_id: str | None = None) -> dict:
+def send_message(text: str, token: Optional[str] = None, chat_id: Optional[str] = None) -> dict:
     token = token or os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
