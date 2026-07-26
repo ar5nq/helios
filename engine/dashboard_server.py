@@ -143,6 +143,18 @@ def index():
   .trade-label.entry {{ color: var(--text); }}
   .trade-label.target {{ color: var(--green); }}
   .trade-label .price {{ font-weight: 600; }}
+  .score-gauge {{ position: relative; width: 90px; height: 90px; }}
+  .score-gauge svg {{ transform: rotate(-90deg); }}
+  .score-gauge .gauge-value {{
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font-size: 22px; font-weight: 700; color: var(--red);
+  }}
+  .score-gauge .gauge-max {{ font-size: 9px; color: var(--text-dim); }}
+  .class-comp-bar {{ display: flex; height: 8px; border-radius: 2px; overflow: hidden; margin: 6px 0; }}
+  .class-comp-legend {{ display: flex; gap: 12px; font-size: 10px; margin-top: 4px; }}
+  .class-comp-legend .dot {{ display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }}
+  .dna-helix {{ width: 100%; height: 100px; }}
+  .dna-label {{ font-size: 9px; text-anchor: middle; fill: var(--text-dim); }}
   .explain-cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; padding: 0 16px 16px 16px; }}
   .explain-card {{ background: var(--bg); border: 1px solid var(--border); padding: 12px; }}
   .explain-card .icon {{ font-size: 18px; }}
@@ -332,6 +344,78 @@ function closeInspector() {{
   document.getElementById('inspector').classList.remove('open');
 }}
 
+function scoreGauge(fitness) {{
+  // Normalize fitness (typically 0-4 range in this system) to a 0-100 "score"
+  // the same way the reference dashboard shows a /100 gauge.
+  const score = Math.max(0, Math.min(100, Math.round(fitness * 22)));
+  const r = 38, circumference = 2 * Math.PI * r;
+  const offset = circumference * (1 - score / 100);
+  return `
+    <div class="score-gauge">
+      <svg width="90" height="90">
+        <circle cx="45" cy="45" r="${{r}}" fill="none" stroke="#2a1418" stroke-width="8"/>
+        <circle cx="45" cy="45" r="${{r}}" fill="none" stroke="#e8384f" stroke-width="8"
+          stroke-dasharray="${{circumference}}" stroke-dashoffset="${{offset}}" stroke-linecap="round"/>
+      </svg>
+      <div class="gauge-value">${{score}}<div class="gauge-max">/100</div></div>
+    </div>
+  `;
+}}
+
+function classComposition(g) {{
+  // Every genome has: 1 signal (the indicator), 1 exec (always present),
+  // plus optionally 1 bias and 1 filter if they're not NONE.
+  const segments = [{{label: 'Signal', count: 1, color: '#a855f7'}}];
+  if (g.bias && g.bias !== 'NONE') segments.push({{label: 'Bias', count: 1, color: '#eab308'}});
+  if (g.filter && g.filter !== 'NONE') segments.push({{label: 'Filter', count: 1, color: '#eab308'}});
+  segments.push({{label: 'Exec', count: 1, color: '#3b82f6'}});
+
+  const total = segments.reduce((sum, s) => sum + s.count, 0);
+  const bar = segments.map(s => `<div style="width:${{(s.count/total)*100}}%; background:${{s.color}}"></div>`).join('');
+  const legend = segments.map(s =>
+    `<span><span class="dot" style="background:${{s.color}}"></span>${{s.label}} ${{s.count}}</span>`
+  ).join('');
+  return `<div class="class-comp-bar">${{bar}}</div><div class="class-comp-legend">${{legend}}</div>`;
+}}
+
+function dnaHelix(g) {{
+  // Decorative double-helix with real gene markers placed along it --
+  // same spirit as the reference: a visual signature of the strategy's DNA.
+  const genes = [
+    {{ label: g.signal_indicator, color: '#a855f7', pos: 0.15 }},
+    {{ label: g.bias !== 'NONE' ? g.bias : null, color: '#eab308', pos: 0.4 }},
+    {{ label: g.filter !== 'NONE' ? g.filter : null, color: '#eab308', pos: 0.6 }},
+    {{ label: g.exec_mode, color: '#3b82f6', pos: 0.85 }},
+  ].filter(gene => gene.label);
+
+  const w = 700, h = 100, cycles = 2;
+  let strand1 = '', strand2 = '';
+  for (let x = 0; x <= w; x += 4) {{
+    const t = (x / w) * cycles * 2 * Math.PI;
+    const y1 = h/2 + Math.sin(t) * (h/2 - 10);
+    const y2 = h/2 - Math.sin(t) * (h/2 - 10);
+    strand1 += `${{x}},${{y1}} `;
+    strand2 += `${{x}},${{y2}} `;
+  }}
+
+  const markers = genes.map(gene => {{
+    const x = gene.pos * w;
+    const t = (x / w) * cycles * 2 * Math.PI;
+    const y = h/2 + Math.sin(t) * (h/2 - 10);
+    return `<circle cx="${{x}}" cy="${{y}}" r="4" fill="${{gene.color}}"/>
+            <line x1="${{x}}" y1="${{y}}" x2="${{x}}" y2="${{h + 12}}" stroke="${{gene.color}}" stroke-width="1"/>
+            <text x="${{x}}" y="${{h + 22}}" class="dna-label">${{gene.label}}</text>`;
+  }}).join('');
+
+  return `
+    <svg class="dna-helix" viewBox="0 0 ${{w}} ${{h + 30}}">
+      <polyline points="${{strand1}}" fill="none" stroke="#4a4745" stroke-width="1"/>
+      <polyline points="${{strand2}}" fill="none" stroke="#4a4745" stroke-width="1"/>
+      ${{markers}}
+    </svg>
+  `;
+}}
+
 function tradeSetupDiagram(direction, entry, stop, target) {{
   // For BUY: stop is below entry, target is above (risk zone on the left, reward on the right).
   // For SELL: mirrored (reward on the left, risk on the right).
@@ -450,15 +534,16 @@ function openInspector(genomeId) {{
 
   document.getElementById('insp-body').innerHTML = `
     <div class="insp-grid">
-      <div class="insp-box">
-        <div class="insp-label">Passport</div>
-        <div class="insp-tag">${{labels[g.id] || g.signal_indicator}}</div>
-        <div class="insp-tag">${{mechanisms[g.id] || g.exec_mode}}</div>
-        <div class="insp-tag">Bias: ${{g.bias}}</div>
-        <div class="insp-tag">Filter: ${{g.filter}}</div>
-        <div class="insp-tag">RR 1:${{g.rr}}</div>
-        <div style="margin-top:12px" class="insp-label">Fitness</div>
-        <div class="fitness" style="font-size:20px">${{score.fitness ?? '--'}}</div>
+      <div class="insp-box" style="display:flex; gap:16px; align-items:flex-start">
+        <div>
+          <div class="insp-label">Passport</div>
+          <div class="insp-tag">${{labels[g.id] || g.signal_indicator}}</div>
+          <div class="insp-tag">${{mechanisms[g.id] || g.exec_mode}}</div>
+          <div class="insp-tag">Bias: ${{g.bias}}</div>
+          <div class="insp-tag">Filter: ${{g.filter}}</div>
+          <div class="insp-tag">RR 1:${{g.rr}}</div>
+        </div>
+        <div style="margin-left:auto">${{scoreGauge(score.fitness || 0)}}</div>
       </div>
       <div class="insp-box">
         <div class="insp-label">Backtest -- Train (in-sample) vs Test (out-of-sample)</div>
@@ -467,6 +552,14 @@ function openInspector(genomeId) {{
         <div class="insp-stat-row"><span class="dim">Win Rate</span><span>${{train.win_rate ?? '--'}}% <span class="dim">/</span> ${{test.win_rate ?? '--'}}%</span></div>
         <div class="insp-stat-row"><span class="dim">Trades</span><span>${{train.trades ?? '--'}} <span class="dim">/</span> ${{test.trades ?? '--'}}</span></div>
       </div>
+    </div>
+    <div class="insp-box" style="margin:0 16px 16px 16px">
+      <div class="insp-label">Class Composition</div>
+      ${{classComposition(g)}}
+    </div>
+    <div class="insp-box" style="margin:0 16px 16px 16px">
+      <div class="insp-label">DNA -- Genetic Makeup</div>
+      ${{dnaHelix(g)}}
     </div>
     <div class="explain-grid">
       <div class="explain-card">
@@ -493,6 +586,10 @@ function openInspector(genomeId) {{
     <div class="insp-box" style="margin:0 16px 16px 16px">
       <div class="insp-label">Equity Curve <span class="dim">(gray = train/in-sample, red = test/out-of-sample -- the honest part)</span></div>
       <canvas id="equity-canvas" width="900" height="180" style="width:100%; height:180px;"></canvas>
+      <div style="display:flex; justify-content:space-between; margin-top:8px; font-size:11px">
+        <span class="dim">IS: <span style="color:var(--text)">${{train.return_pct ?? '--'}}%</span></span>
+        <span class="dim">OOS: <span style="color:var(--red)">${{test.return_pct ?? '--'}}%</span></span>
+      </div>
     </div>
   `;
 
