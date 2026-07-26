@@ -34,6 +34,10 @@ def main():
     breed.add_argument("--timeframe", required=True)
     breed.add_argument("--population", type=int, default=40)
     breed.add_argument("--generations", type=int, default=5)
+    breed.add_argument("--min-test-trades", type=int, default=25,
+                        help="minimum out-of-sample trades to promote a strategy. "
+                             "Lower this for inherently low-frequency indicators like ORB "
+                             "(once-per-day max) which can't naturally clear 25 on M5/M15.")
 
     signal = sub.add_parser("signal")
     signal.add_argument("--genome", required=True)
@@ -94,7 +98,8 @@ def main():
     args = parser.parse_args()
 
     if args.cmd == "breed":
-        result = run_campaign(args.symbol, args.timeframe, args.population, args.generations)
+        result = run_campaign(args.symbol, args.timeframe, args.population, args.generations,
+                               min_test_trades=args.min_test_trades)
         print(json.dumps(result, indent=2))
 
     elif args.cmd == "signal":
