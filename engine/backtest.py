@@ -94,6 +94,161 @@ def _detect_ote_signal(df: pd.DataFrame, swing_window: int = 20) -> pd.Series:
     return sig
 
 
+def _detect_order_block_signal(df: pd.DataFrame, lookback: int = 20, impulse_bars: int = 3) -> pd.Series:
+    """ICT Order Block: the last opposite-direction candle before a strong
+    impulse move. A bearish (down) candle right before a strong rally is a
+    bullish order block; price often returns to tap that candle's range
+    before continuing. Bearish order block is the mirror."""
+    o, h, low, c = df["Open"], df["High"], df["Low"], df["Close"]
+    sig = pd.Series(0, index=df.index)
+    bull_obs, bear_obs = [], []
+
+    atr = (h - low).rolling(14).mean()
+
+    for i in range(impulse_bars, len(df)):
+        candle_idx = i - impulse_bars
+        is_down_candle = c.iloc[candle_idx] < o.iloc[candle_idx]
+        is_up_candle = c.iloc[candle_idx] > o.iloc[candle_idx]
+        impulse_move = c.iloc[i] - c.iloc[candle_idx]
+        threshold = (atr.iloc[i] or 0) * 1.5
+
+        if is_down_candle and impulse_move > threshold:
+            bull_obs.append((i, low.iloc[candle_idx], h.iloc[candle_idx]))
+        if is_up_candle and -impulse_move > threshold:
+            bear_obs.append((i, low.iloc[candle_idx], h.iloc[candle_idx]))
+
+        bull_obs = [z for z in bull_obs if i - z[0] <= lookback]
+        bear_obs = [z for z in bear_obs if i - z[0] <= lookback]
+
+        price = c.iloc[i]
+        for formed_at, bottom, top in bull_obs:
+            if formed_at != i and bottom <= price <= top:
+                sig.iloc[i] = 1
+                break
+        if sig.iloc[i] == 0:
+            for formed_at, bottom, top in bear_obs:
+                if formed_at != i and bottom <= price <= top:
+                    sig.iloc[i] = -1
+                    break
+    return sig
+
+
+def _detect_liquidity_sweep_signal(df: pd.DataFrame, window: int = 10, tolerance: float = 0.0015) -> pd.Series:
+    """Equal highs/lows form a liquidity pool. A sweep is price briefly
+    trading beyond that level then closing back inside it -- the classic
+    'stop hunt then reverse' pattern."""
+    h, low, c = df["High"], df["Low"], df["Close"]
+    rolling_high = h.rolling(window).max()
+    rolling_low = low.rolling(window).min()
+
+    sig = pd.Series(0, index=df.index)
+    for i in range(window, len(df)):
+        prior_high = rolling_high.iloc[i - 1]
+        prior_low = rolling_low.iloc[i - 1]
+
+        # bearish sweep: this bar's high exceeds the prior pool high, but closes back below it
+        if h.iloc[i] > prior_high * (1 + tolerance) and c.iloc[i] < prior_high:
+            sig.iloc[i] = -1
+        # bullish sweep: this bar's low undercuts the prior pool low, but closes back above it
+        elif low.iloc[i] < prior_low * (1 - tolerance) and c.iloc[i] > prior_low:
+            sig.iloc[i] = 1
+
+    return sig
+
+
+def _detect_support_resistance_signal(df: pd.DataFrame, window: int = 20) -> pd.Series:
+    """Bounce/rejection at a recent swing-based support or resistance level."""
+    h, low, c = df["High"], df["Low"], df["Close"]
+    resistance = h.rolling(window).max().shift(1)
+    support = low.rolling(window).min().shift(1)
+
+    near_resistance = (h >= resistance * 0.999) & (c < resistance)
+    near_support = (low <= support * 1.001) & (c > support)
+
+    sig = pd.Series(0, index=df.index)
+    sig[near_resistance.fillna(False)] = -1  # rejected at resistance -> short
+    sig[near_support.fillna(False)] = 1      # rejected at support -> long
+    return sig
+
+
+def _detect_supply_demand_signal(df: pd.DataFrame, consolidation_bars: int = 5,
+                                  lookback: int = 30) -> pd.Series:
+    """A tight consolidation (small range) followed by a strong breakout
+    marks that consolidation as a supply (before a drop) or demand (before
+    a rally) zone. Price returning to tap that zone often continues in the
+    breakout's direction."""
+    h, low, c = df["High"], df["Low"], df["Close"]
+    atr = (h - low).rolling(14).mean()
+    sig = pd.Series(0, index=df.index)
+    demand_zones, supply_zones = [], []
+
+    for i in range(consolidation_bars + 3, len(df)):
+        zone_start = i - consolidation_bars - 3
+        zone_end = i - 3
+        zone_high = h.iloc[zone_start:zone_end].max()
+        zone_low = low.iloc[zone_start:zone_end].min()
+        zone_range = zone_high - zone_low
+        is_tight = zone_range < (atr.iloc[i] or zone_range + 1) * 2.5
+
+        breakout_move = c.iloc[i] - c.iloc[zone_end]
+        threshold = (atr.iloc[i] or 0) * 1.5
+
+        if is_tight and breakout_move > threshold:
+            demand_zones.append((i, zone_low, zone_high))
+        if is_tight and -breakout_move > threshold:
+            supply_zones.append((i, zone_low, zone_high))
+
+        demand_zones = [z for z in demand_zones if i - z[0] <= lookback]
+        supply_zones = [z for z in supply_zones if i - z[0] <= lookback]
+
+        price = c.iloc[i]
+        for formed_at, bottom, top in demand_zones:
+            if formed_at != i and bottom <= price <= top:
+                sig.iloc[i] = 1
+                break
+        if sig.iloc[i] == 0:
+            for formed_at, bottom, top in supply_zones:
+                if formed_at != i and bottom <= price <= top:
+                    sig.iloc[i] = -1
+                    break
+    return sig
+
+
+def _detect_rejection_block_signal(df: pd.DataFrame, wick_ratio: float = 2.0,
+                                    lookback: int = 20) -> pd.Series:
+    """A candle with an unusually long wick (rejection) marks that wick's
+    zone. Price tapping back into it often gets rejected the same way again."""
+    o, h, low, c = df["Open"], df["High"], df["Low"], df["Close"]
+    body = (c - o).abs()
+    upper_wick = h - pd.concat([o, c], axis=1).max(axis=1)
+    lower_wick = pd.concat([o, c], axis=1).min(axis=1) - low
+
+    sig = pd.Series(0, index=df.index)
+    bull_zones, bear_zones = [], []  # bullish rejection = long lower wick; bearish = long upper wick
+
+    for i in range(lookback, len(df)):
+        b = body.iloc[i] or 0.0001
+        if lower_wick.iloc[i] > b * wick_ratio:
+            bull_zones.append((i, low.iloc[i], low.iloc[i] + lower_wick.iloc[i] * 0.5))
+        if upper_wick.iloc[i] > b * wick_ratio:
+            bear_zones.append((i, h.iloc[i] - upper_wick.iloc[i] * 0.5, h.iloc[i]))
+
+        bull_zones = [z for z in bull_zones if i - z[0] <= lookback]
+        bear_zones = [z for z in bear_zones if i - z[0] <= lookback]
+
+        price = c.iloc[i]
+        for formed_at, bottom, top in bull_zones:
+            if formed_at != i and bottom <= price <= top:
+                sig.iloc[i] = 1
+                break
+        if sig.iloc[i] == 0:
+            for formed_at, bottom, top in bear_zones:
+                if formed_at != i and bottom <= price <= top:
+                    sig.iloc[i] = -1
+                    break
+    return sig
+
+
 def _macd_line(close: pd.Series, period: int) -> tuple:
     fast = max(2, period // 2)
     slow = period
@@ -188,6 +343,31 @@ def _raw_signal(df: pd.DataFrame, genome: dict, reference_df: pd.DataFrame = Non
             raise ValueError("SMT indicator requires reference_df (a correlated instrument)")
         from .smt import detect_smt_signal
         raw = detect_smt_signal(df, reference_df, window=max(10, period))
+        long = raw == 1
+        short = raw == -1
+
+    elif indicator == "ORDER_BLOCK":
+        raw = _detect_order_block_signal(df, lookback=max(10, period))
+        long = raw == 1
+        short = raw == -1
+
+    elif indicator == "LIQUIDITY_SWEEP":
+        raw = _detect_liquidity_sweep_signal(df, window=max(5, period // 2))
+        long = raw == 1
+        short = raw == -1
+
+    elif indicator == "SUPPORT_RESISTANCE":
+        raw = _detect_support_resistance_signal(df, window=max(10, period))
+        long = raw == 1
+        short = raw == -1
+
+    elif indicator == "SUPPLY_DEMAND":
+        raw = _detect_supply_demand_signal(df, lookback=max(15, period))
+        long = raw == 1
+        short = raw == -1
+
+    elif indicator == "REJECTION_BLOCK":
+        raw = _detect_rejection_block_signal(df, lookback=max(10, period))
         long = raw == 1
         short = raw == -1
 

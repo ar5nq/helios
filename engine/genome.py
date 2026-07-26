@@ -10,7 +10,9 @@ so a strategy's genetic makeup is inspectable at a glance.
 import random
 import uuid
 
-INDICATORS = ["SMA", "EMA", "RSI", "MACD", "ATR", "BOLLINGER", "CCI", "WILLIAMS_R", "FVG", "OTE", "SMT"]
+INDICATORS = ["SMA", "EMA", "RSI", "MACD", "ATR", "BOLLINGER", "CCI", "WILLIAMS_R",
+              "FVG", "OTE", "SMT", "ORDER_BLOCK", "LIQUIDITY_SWEEP", "SUPPORT_RESISTANCE",
+              "SUPPLY_DEMAND", "REJECTION_BLOCK"]
 BIAS_MODES = ["HTF_TREND", "NONE", "TRAILING"]
 FILTER_MODES = ["NONE", "ATR_REGIME", "CHOP", "RSI_RANGE"]
 EXEC_MODES = ["FIXED_RR", "TRAILING_STOP", "ATR_STOP"]
@@ -23,6 +25,9 @@ INDICATOR_NAMES = {
     "MACD": "MACD Cross", "ATR": "Vol Breakout", "BOLLINGER": "Band Breakout",
     "CCI": "CCI Reversion", "WILLIAMS_R": "Williams Reversion",
     "FVG": "FVG Tap", "OTE": "OTE Retracement", "SMT": "SMT Divergence",
+    "ORDER_BLOCK": "Order Block Tap", "LIQUIDITY_SWEEP": "Liquidity Sweep",
+    "SUPPORT_RESISTANCE": "S/R Bounce", "SUPPLY_DEMAND": "Supply/Demand Zone",
+    "REJECTION_BLOCK": "Rejection Block Tap",
 }
 BIAS_NAMES = {"HTF_TREND": "HTF", "TRAILING": "Trail", "NONE": None}
 FILTER_NAMES = {
@@ -54,6 +59,11 @@ INDICATOR_EXPLAIN = {
     "FVG": "enters when price taps back into an unfilled Fair Value Gap -- an ICT-style imbalance-fill trigger",
     "OTE": "enters when price retraces into the 61.8-79% Fibonacci zone of a recent swing -- ICT's Optimal Trade Entry",
     "SMT": "enters when this instrument makes a fresh high/low that its correlated pair (e.g. SP500 for NAS100) does NOT confirm -- a smart-money divergence, betting the unconfirmed move reverses",
+    "ORDER_BLOCK": "enters when price returns to tap the last opposite-direction candle before a strong impulse move -- ICT's Order Block concept",
+    "LIQUIDITY_SWEEP": "enters when price sweeps beyond an equal-highs/lows liquidity pool then snaps back inside -- a stop-hunt reversal",
+    "SUPPORT_RESISTANCE": "enters on a bounce/rejection at a recent swing-based support or resistance level",
+    "SUPPLY_DEMAND": "enters when price returns to a consolidation zone that preceded a strong directional move -- a supply or demand zone",
+    "REJECTION_BLOCK": "enters when price returns to tap a candle with an unusually long rejection wick -- betting the same rejection repeats",
 }
 BIAS_EXPLAIN = {
     "HTF_TREND": "only takes trades that agree with the direction of a higher-timeframe trend filter",

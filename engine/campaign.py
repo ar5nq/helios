@@ -47,7 +47,18 @@ def run_campaign(symbol: str, timeframe: str, population: int = 40,
             reference_df = fetch(ref_symbol, timeframe)
         except Exception:
             reference_df = None  # SMT genomes will just fail their backtest and get skipped
-    pop = [random_genome(symbol, timeframe) for _ in range(population)]
+    # Guarantee every indicator type is represented at least once in the
+    # starting population -- otherwise, with 16 indicators and a small
+    # population, rare ones (FVG, SMT, order blocks, etc.) can go entirely
+    # untested purely by random chance, every single campaign.
+    from .genome import INDICATORS
+    pop = []
+    for indicator in INDICATORS[:population]:
+        g = random_genome(symbol, timeframe)
+        g["signal_indicator"] = indicator
+        pop.append(g)
+    while len(pop) < population:
+        pop.append(random_genome(symbol, timeframe))
 
     history = []
     for gen in range(generations):
