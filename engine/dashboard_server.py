@@ -14,7 +14,7 @@ import webbrowser
 
 from flask import Flask, jsonify, request
 
-from .genome import genome_label, genome_mechanism, explain_genome, explain_genome_cards, explain_genome_cards
+from .genome import genome_label, genome_mechanism, explain_genome, explain_genome_cards
 from .portfolio import analyze_portfolio
 from .active_strategies import get_active, activate, deactivate
 from .risk import calculate_lot_size, load_account
@@ -75,6 +75,7 @@ def index():
 
     return f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Helios // Strategy Vault</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
   :root {{
     --bg: #0a0a0c; --panel: #111114; --border: #2a1418;
@@ -133,6 +134,15 @@ def index():
   .explain-card .card-num {{ color: var(--red); font-size: 10px; font-weight: 600; }}
   .explain-card .card-title {{ font-size: 13px; font-weight: 600; margin: 4px 0 6px 0; }}
   .explain-card .card-text {{ font-size: 11px; line-height: 1.5; color: var(--text-dim); }}
+  .trade-diagram {{ position: relative; height: 90px; margin: 12px 0; }}
+  .trade-bar {{ position: relative; height: 24px; border-radius: 3px; overflow: hidden; display: flex; }}
+  .trade-bar .risk-zone {{ background: rgba(232,56,79,0.25); border-right: 2px solid var(--red); }}
+  .trade-bar .reward-zone {{ background: rgba(62,207,142,0.25); border-left: 2px solid var(--green); }}
+  .trade-label {{ position: absolute; font-size: 10px; white-space: nowrap; transform: translateX(-50%); }}
+  .trade-label.stop {{ color: var(--red); }}
+  .trade-label.entry {{ color: var(--text); }}
+  .trade-label.target {{ color: var(--green); }}
+  .trade-label .price {{ font-weight: 600; }}
   .explain-cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; padding: 0 16px 16px 16px; }}
   .explain-card {{ background: var(--bg); border: 1px solid var(--border); padding: 12px; }}
   .explain-card .icon {{ font-size: 18px; }}
@@ -209,7 +219,7 @@ function renderSignals() {{
     el.innerHTML = '<div class="empty">No pending signals right now.</div>';
     return;
   }}
-  let rows = pending.map(s => {{
+  let cards = pending.map(s => {{
     const dirClass = s.direction === 'BUY' ? 'buy' : 'sell';
     const rr = calcRR(s.entry, s.stop, s.target);
     const lot = s._lot ? s._lot.lots : '--';
@@ -218,31 +228,26 @@ function renderSignals() {{
     const winActive = s.outcome === 'WIN' ? 'active' : '';
     const lossActive = s.outcome === 'LOSS' ? 'active' : '';
     const beActive = s.outcome === 'BREAKEVEN' ? 'active' : '';
-    return `<tr>
-      <td class="dim">${{s.id}}</td>
-      <td class="${{dirClass}}">${{s.direction}}</td>
-      <td>${{s.symbol}} <span class="dim">${{s.timeframe}}</span></td>
-      <td class="dim">${{s._label}}</td>
-      <td>${{s.entry}} / ${{s.stop}} / ${{s.target}}</td>
-      <td>1:${{rr}}</td>
-      <td>${{lot}}</td>
-      <td>
-        <div class="btn-group">
-          <button class="btn ${{takenYesActive}}" onclick="respond('${{s.id}}', true, ${{s.outcome ? `'${{s.outcome}}'` : 'null'}})">Taken</button>
-          <button class="btn ${{takenNoActive}}" onclick="respond('${{s.id}}', false, ${{s.outcome ? `'${{s.outcome}}'` : 'null'}})">Skip</button>
+    return `<div class="insp-box" style="margin-bottom:12px">
+      <div style="display:flex; justify-content:space-between; align-items:center">
+        <div>
+          <span class="${{dirClass}}" style="font-weight:600">${{s.direction}}</span>
+          <span> ${{s.symbol}} <span class="dim">${{s.timeframe}}</span> -- ${{s._label}}</span>
+          <span class="dim"> -- RR 1:${{rr}} -- ${{lot}} lots</span>
         </div>
-        <div class="btn-group">
-          <button class="btn win ${{winActive}}" onclick="respond('${{s.id}}', ${{s.taken}}, 'WIN')">Win</button>
-          <button class="btn loss ${{lossActive}}" onclick="respond('${{s.id}}', ${{s.taken}}, 'LOSS')">Loss</button>
-          <button class="btn be ${{beActive}}" onclick="respond('${{s.id}}', ${{s.taken}}, 'BREAKEVEN')">BE</button>
-        </div>
-      </td>
-    </tr>`;
+        <div class="dim" style="font-size:10px">${{s.id}}</div>
+      </div>
+      ${{tradeSetupDiagram(s.direction, s.entry, s.stop, s.target)}}
+      <div class="btn-group">
+        <button class="btn ${{takenYesActive}}" onclick="respond('${{s.id}}', true, ${{s.outcome ? `'${{s.outcome}}'` : 'null'}})">Taken</button>
+        <button class="btn ${{takenNoActive}}" onclick="respond('${{s.id}}', false, ${{s.outcome ? `'${{s.outcome}}'` : 'null'}})">Skip</button>
+        <button class="btn win ${{winActive}}" onclick="respond('${{s.id}}', ${{s.taken}}, 'WIN')">Win</button>
+        <button class="btn loss ${{lossActive}}" onclick="respond('${{s.id}}', ${{s.taken}}, 'LOSS')">Loss</button>
+        <button class="btn be ${{beActive}}" onclick="respond('${{s.id}}', ${{s.taken}}, 'BREAKEVEN')">BE</button>
+      </div>
+    </div>`;
   }}).join('');
-  el.innerHTML = `<table><tr>
-    <th>ID</th><th>Dir</th><th>Symbol</th><th>Strategy</th><th>Entry/Stop/Target</th>
-    <th>RR</th><th>Lots</th><th>Respond</th>
-  </tr>${{rows}}</table>`;
+  el.innerHTML = cards;
 }}
 
 function renderVault() {{
@@ -327,43 +332,105 @@ function closeInspector() {{
   document.getElementById('inspector').classList.remove('open');
 }}
 
-function drawEquityCurve(canvas, trainCurve, testCurve) {{
-  const ctx = canvas.getContext('2d');
-  const w = canvas.width, h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
-  const all = trainCurve.concat(testCurve);
-  if (!all.length) return;
-  const min = Math.min(...all), max = Math.max(...all);
-  const range = (max - min) || 1;
-  const totalPoints = all.length;
-  const stepX = w / Math.max(1, totalPoints - 1);
-  const toY = (v) => h - ((v - min) / range) * (h - 10) - 5;
+function tradeSetupDiagram(direction, entry, stop, target) {{
+  // For BUY: stop is below entry, target is above (risk zone on the left, reward on the right).
+  // For SELL: mirrored (reward on the left, risk on the right).
+  const isBuy = direction === 'BUY';
+  const low = isBuy ? stop : target;
+  const high = isBuy ? target : stop;
+  const range = high - low || 1;
+  const entryPct = Math.max(0, Math.min(100, ((entry - low) / range) * 100));
 
-  function drawSeries(curve, offset, color) {{
-    ctx.beginPath();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5;
-    curve.forEach((v, i) => {{
-      const x = (offset + i) * stepX;
-      const y = toY(v);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }});
-    ctx.stroke();
-  }}
+  const riskWidth = isBuy ? entryPct : (100 - entryPct);
+  const rewardWidth = 100 - riskWidth;
+  const riskZone = `<div class="risk-zone" style="width:${{riskWidth}}%"></div>`;
+  const rewardZone = `<div class="reward-zone" style="width:${{rewardWidth}}%"></div>`;
+  const zones = isBuy ? riskZone + rewardZone : rewardZone + riskZone;
 
-  drawSeries(trainCurve, 0, '#8a8785');
-  drawSeries(testCurve, trainCurve.length - 1, '#e8384f');
-
-  // split marker
-  const splitX = (trainCurve.length - 1) * stepX;
-  ctx.beginPath();
-  ctx.strokeStyle = '#2a1418';
-  ctx.setLineDash([3, 3]);
-  ctx.moveTo(splitX, 0);
-  ctx.lineTo(splitX, h);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  return `
+    <div class="trade-diagram">
+      <div class="trade-bar">${{zones}}</div>
+      <div class="trade-label stop" style="left:${{isBuy ? 0 : 100}}%; top:28px">STOP<br><span class="price">${{stop}}</span></div>
+      <div class="trade-label entry" style="left:${{entryPct}}%; top:28px">ENTRY<br><span class="price">${{entry}}</span></div>
+      <div class="trade-label target" style="left:${{isBuy ? 100 : 0}}%; top:28px">TARGET<br><span class="price">${{target}}</span></div>
+    </div>
+  `;
 }}
+
+let equityChart = null;
+
+function drawEquityCurve(canvas, trainCurve, testCurve) {{
+  if (equityChart) {{
+    equityChart.destroy();
+  }}
+  const combined = trainCurve.concat(testCurve.slice(1));  // avoid duplicating the split point
+  const labels = combined.map((_, i) => i);
+  const trainData = trainCurve.map(v => v);
+  const testData = new Array(trainCurve.length - 1).fill(null).concat(testCurve);
+
+  equityChart = new Chart(canvas, {{
+    type: 'line',
+    data: {{
+      labels: labels,
+      datasets: [
+        {{
+          label: 'Train (in-sample)',
+          data: trainData,
+          borderColor: '#8a8785',
+          backgroundColor: 'rgba(138,135,133,0.08)',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          fill: true,
+          tension: 0.15,
+        }},
+        {{
+          label: 'Test (out-of-sample)',
+          data: testData,
+          borderColor: '#e8384f',
+          backgroundColor: 'rgba(232,56,79,0.10)',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          fill: true,
+          tension: 0.15,
+        }},
+      ]
+    }},
+    options: {{
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {{ mode: 'index', intersect: false }},
+      plugins: {{
+        legend: {{
+          labels: {{ color: '#8a8785', font: {{ family: 'monospace', size: 10 }}, boxWidth: 12 }}
+        }},
+        tooltip: {{
+          backgroundColor: '#111114',
+          titleColor: '#8a8785',
+          bodyColor: '#e4e2e0',
+          borderColor: '#2a1418',
+          borderWidth: 1,
+          callbacks: {{
+            label: (ctx) => `${{ctx.dataset.label}}: ${{((ctx.raw - 1) * 100).toFixed(2)}}%`
+          }}
+        }}
+      }},
+      scales: {{
+        x: {{
+          grid: {{ color: '#1a1a1d' }},
+          ticks: {{ color: '#8a8785', font: {{ family: 'monospace', size: 9 }}, maxTicksLimit: 8 }}
+        }},
+        y: {{
+          grid: {{ color: '#1a1a1d' }},
+          ticks: {{
+            color: '#8a8785', font: {{ family: 'monospace', size: 9 }},
+            callback: (v) => ((v - 1) * 100).toFixed(1) + '%'
+          }}
+        }}
+      }}
+    }}
+  }});
+}}
+
 
 function openInspector(genomeId) {{
   const g = vault.find(v => v.id === genomeId);
