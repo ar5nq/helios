@@ -11,8 +11,8 @@ import random
 import uuid
 
 INDICATORS = ["SMA", "EMA", "RSI", "MACD", "ATR", "BOLLINGER", "CCI", "WILLIAMS_R",
-              "FVG", "OTE", "SMT", "ORDER_BLOCK", "LIQUIDITY_SWEEP", "SUPPORT_RESISTANCE",
-              "SUPPLY_DEMAND", "REJECTION_BLOCK", "ORB", "ORB_CISD"]
+              "FVG", "IFVG", "OTE", "SMT", "ORDER_BLOCK", "LIQUIDITY_SWEEP", "SUPPORT_RESISTANCE",
+              "SUPPLY_DEMAND", "REJECTION_BLOCK", "ORB", "ORB_CISD", "ICT_CONFLUENCE"]
 BIAS_MODES = ["HTF_TREND", "NONE", "TRAILING"]
 FILTER_MODES = ["NONE", "ATR_REGIME", "CHOP", "RSI_RANGE"]
 EXEC_MODES = ["FIXED_RR", "TRAILING_STOP", "ATR_STOP"]
@@ -25,10 +25,12 @@ INDICATOR_NAMES = {
     "MACD": "MACD Cross", "ATR": "Vol Breakout", "BOLLINGER": "Band Breakout",
     "CCI": "CCI Reversion", "WILLIAMS_R": "Williams Reversion",
     "FVG": "FVG Tap", "OTE": "OTE Retracement", "SMT": "SMT Divergence",
+    "IFVG": "Inverse FVG",
     "ORDER_BLOCK": "Order Block Tap", "LIQUIDITY_SWEEP": "Liquidity Sweep",
     "SUPPORT_RESISTANCE": "S/R Bounce", "SUPPLY_DEMAND": "Supply/Demand Zone",
     "REJECTION_BLOCK": "Rejection Block Tap", "ORB": "Opening Range Breakout",
     "ORB_CISD": "ORB Liquidity Sweep + CISD",
+    "ICT_CONFLUENCE": "ICT Confluence (S/R + FVG/OB/RB)",
 }
 BIAS_NAMES = {"HTF_TREND": "HTF", "TRAILING": "Trail", "NONE": None}
 FILTER_NAMES = {
@@ -67,6 +69,8 @@ INDICATOR_EXPLAIN = {
     "REJECTION_BLOCK": "enters when price returns to tap a candle with an unusually long rejection wick -- betting the same rejection repeats",
     "ORB": "enters when price breaks out of the opening range (8:12-9:12 ET by default)",
     "ORB_CISD": "watches which side of the opening range's liquidity gets swept first, then enters the REVERSE direction once a CISD (Change in State of Delivery) confirms the reversal on the 5-minute chart",
+    "IFVG": "enters when a Fair Value Gap fails and flips polarity -- a failed bullish gap becomes resistance, a failed bearish gap becomes support",
+    "ICT_CONFLUENCE": "requires MULTIPLE ICT concepts to agree before entering: a support/resistance reaction PLUS at least one of FVG/inverse-FVG/Order-Block/Rejection-Block confirming the same direction, with SMT divergence as a bonus veto if it disagrees",
 }
 BIAS_EXPLAIN = {
     "HTF_TREND": "only takes trades that agree with the direction of a higher-timeframe trend filter",

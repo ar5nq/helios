@@ -249,6 +249,82 @@ def _detect_rejection_block_signal(df: pd.DataFrame, wick_ratio: float = 2.0,
     return sig
 
 
+def _detect_ifvg_signal(df: pd.DataFrame, lookback: int = 20) -> pd.Series:
+    """Inverse FVG (iFVG): when a Fair Value Gap zone gets fully violated
+    (price closes all the way through it in the OPPOSITE direction), that
+    zone flips polarity -- a bullish gap that fails becomes resistance,
+    a bearish gap that fails becomes support. Price tapping the flipped
+    zone afterward fires in the NEW (opposite) direction."""
+    high, low, close = df["High"], df["Low"], df["Close"]
+    sig = pd.Series(0, index=df.index)
+
+    bull_gaps, bear_gaps = [], []  # each: (formed_at, bottom, top, violated: bool)
+
+    for i in range(2, len(df)):
+        if high.iloc[i - 2] < low.iloc[i]:
+            bull_gaps.append({"formed_at": i, "bottom": high.iloc[i - 2], "top": low.iloc[i], "violated": False})
+        if low.iloc[i - 2] > high.iloc[i]:
+            bear_gaps.append({"formed_at": i, "bottom": high.iloc[i], "top": low.iloc[i - 2], "violated": False})
+
+        bull_gaps = [g for g in bull_gaps if i - g["formed_at"] <= lookback]
+        bear_gaps = [g for g in bear_gaps if i - g["formed_at"] <= lookback]
+
+        c = close.iloc[i]
+        # a bullish gap gets violated if price closes fully BELOW it -> flips to resistance
+        for g in bull_gaps:
+            if not g["violated"] and c < g["bottom"]:
+                g["violated"] = True
+            elif g["violated"] and g["bottom"] <= c <= g["top"]:
+                sig.iloc[i] = -1  # tapping the flipped zone from below -> now resistance
+                break
+
+        if sig.iloc[i] == 0:
+            for g in bear_gaps:
+                if not g["violated"] and c > g["top"]:
+                    g["violated"] = True
+                elif g["violated"] and g["bottom"] <= c <= g["top"]:
+                    sig.iloc[i] = 1  # tapping the flipped zone from above -> now support
+                    break
+
+    return sig
+
+
+def _detect_ict_confluence_signal(df: pd.DataFrame, reference_df: pd.DataFrame = None,
+                                   window: int = 20) -> pd.Series:
+    """Combines multiple ICT/SMC concepts and only fires where they AGREE --
+    a real confluence system instead of competing single indicators. Fires
+    when a support/resistance reaction lines up with at least one of:
+    FVG tap, inverse FVG, Order Block tap, or Rejection Block tap in the
+    SAME direction. If a correlated reference instrument is available, SMT
+    divergence agreement adds further confirmation (optional, not required)."""
+    sr = _detect_support_resistance_signal(df, window=window)
+    fvg = _detect_fvg_signal(df)
+    ifvg = _detect_ifvg_signal(df)
+    ob = _detect_order_block_signal(df)
+    rb = _detect_rejection_block_signal(df)
+
+    smart_money_zone = pd.Series(0, index=df.index)
+    for zone_sig in (fvg, ifvg, ob, rb):
+        smart_money_zone = smart_money_zone.where(smart_money_zone != 0, zone_sig)
+
+    # confluence: S/R reaction AND a smart-money zone must agree on direction
+    confluence = pd.Series(0, index=df.index)
+    agree_long = (sr == 1) & (smart_money_zone == 1)
+    agree_short = (sr == -1) & (smart_money_zone == -1)
+    confluence[agree_long] = 1
+    confluence[agree_short] = -1
+
+    if reference_df is not None:
+        from .smt import detect_smt_signal
+        smt = detect_smt_signal(df, reference_df, window=window)
+        # SMT is a bonus confirmation, not a requirement -- if it actively
+        # DISAGREES with the confluence direction, cancel that signal out
+        disagree = ((confluence == 1) & (smt == -1)) | ((confluence == -1) & (smt == 1))
+        confluence[disagree] = 0
+
+    return confluence
+
+
 def _macd_line(close: pd.Series, period: int) -> tuple:
     fast = max(2, period // 2)
     slow = period
@@ -330,6 +406,16 @@ def _raw_signal(df: pd.DataFrame, genome: dict, reference_df: pd.DataFrame = Non
 
     elif indicator == "FVG":
         raw = _detect_fvg_signal(df)
+        long = raw == 1
+        short = raw == -1
+
+    elif indicator == "IFVG":
+        raw = _detect_ifvg_signal(df)
+        long = raw == 1
+        short = raw == -1
+
+    elif indicator == "ICT_CONFLUENCE":
+        raw = _detect_ict_confluence_signal(df, reference_df, window=max(10, period))
         long = raw == 1
         short = raw == -1
 
