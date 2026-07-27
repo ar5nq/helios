@@ -47,23 +47,97 @@ def _lot_size_for(signal: dict):
         return None
 
 
+def _calc_rr(entry, stop, target):
+    risk = abs(entry - stop)
+    reward = abs(target - entry)
+    return round(reward / risk, 2) if risk else 0.0
+
+
+def _performance_summary(signals: list) -> dict:
+    """Real P&L in R-multiples from actual reported outcomes -- a WIN pays
+    +RR, a LOSS pays -1R, a BREAKEVEN pays 0. This only counts signals you
+    actually responded to, not every signal ever fired."""
+    closed = [s for s in signals if s.get("outcome") is not None]
+    if not closed:
+        return {"net_r": 0.0, "win_rate": None, "total_closed": 0, "wins": 0, "losses": 0, "breakevens": 0}
+
+    net_r = 0.0
+    wins = losses = breakevens = 0
+    for s in closed:
+        rr = _calc_rr(s["entry"], s["stop"], s["target"])
+        if s["outcome"] == "WIN":
+            net_r += rr
+            wins += 1
+        elif s["outcome"] == "LOSS":
+            net_r -= 1
+            losses += 1
+        else:
+            breakevens += 1
+
+    decided = wins + losses  # breakevens don't count toward win rate
+    win_rate = round(100 * wins / decided, 1) if decided else None
+    return {
+        "net_r": round(net_r, 2), "win_rate": win_rate, "total_closed": len(closed),
+        "wins": wins, "losses": losses, "breakevens": breakevens,
+    }
+
+
+def _market_bias(vault: list, active_ids: list, signals: list) -> dict:
+    """For each symbol with at least one ACTIVE strategy, shows the REAL
+    current direction based on actual pending signals (not a guess), plus
+    a confidence % from the average backtest win rate of the active
+    strategies for that symbol. If there's no live pending signal, it says
+    so honestly instead of making one up."""
+    active_genomes = [g for g in vault if g["id"] in active_ids]
+    by_symbol = {}
+    for g in active_genomes:
+        by_symbol.setdefault(g["symbol"], []).append(g)
+
+    pending_by_symbol = {}
+    for s in signals:
+        if s["taken"] is None or s["outcome"] is None:
+            pending_by_symbol.setdefault(s["symbol"], []).append(s["direction"])
+
+    bias = {}
+    for symbol, genomes in by_symbol.items():
+        win_rates = [g.get("score", {}).get("test", {}).get("win_rate", 50) for g in genomes]
+        avg_win_rate = sum(win_rates) / len(win_rates) if win_rates else 50
+
+        directions = pending_by_symbol.get(symbol, [])
+        longs = directions.count("BUY")
+        shorts = directions.count("SELL")
+        if longs == 0 and shorts == 0:
+            direction = None  # no live signal right now -- don't fabricate one
+        else:
+            direction = "LONG" if longs >= shorts else "SHORT"
+
+        bias[symbol] = {
+            "active_count": len(genomes),
+            "avg_test_win_rate": round(avg_win_rate, 1),
+            "confidence": round(min(100, avg_win_rate), 1),
+            "direction": direction,
+            "pending_signal_count": len(directions),
+        }
+    return bias
+
+
 @app.route("/")
 def index():
     vault = _load_json(VAULT_PATH, [])
     signals = list_signals(pending_only=False)
     pending = [s for s in signals if s["taken"] is None or s["outcome"] is None]
     closed = [s for s in signals if s["outcome"] is not None]
-    wins = sum(1 for s in closed if s["outcome"] == "WIN")
-    live_win_rate = round(100 * wins / len(closed), 1) if closed else None
 
     labels = {g["id"]: genome_label(g) for g in vault}
     mechanisms = {g["id"]: genome_mechanism(g) for g in vault}
     explanations = {g["id"]: explain_genome_cards(g) for g in vault}
-    explain_cards = {g["id"]: explain_genome_cards(g) for g in vault}
     active_ids = get_active()
     for s in signals:
         s["_lot"] = _lot_size_for(s)
         s["_label"] = labels.get(s["genome_id"], s["genome_id"])
+
+    performance = _performance_summary(signals)
+    bias = _market_bias(vault, active_ids, signals)
 
     vault_json = json.dumps(vault)
     signals_json = json.dumps(signals)
@@ -71,7 +145,8 @@ def index():
     mechanisms_json = json.dumps(mechanisms)
     active_json = json.dumps(active_ids)
     explanations_json = json.dumps(explanations)
-    explain_cards_json = json.dumps(explain_cards)
+    performance_json = json.dumps(performance)
+    bias_json = json.dumps(bias)
 
     return f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Helios // Strategy Vault</title>
@@ -155,6 +230,14 @@ def index():
   .class-comp-legend .dot {{ display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }}
   .dna-helix {{ width: 100%; height: 100px; }}
   .dna-label {{ font-size: 9px; text-anchor: middle; fill: var(--text-dim); }}
+  .bias-card {{ background: var(--bg); border: 1px solid var(--border); padding: 12px; min-width: 160px; flex: 1; }}
+  .bias-card .symbol {{ font-size: 14px; font-weight: 700; margin-bottom: 4px; }}
+  .bias-card .direction {{ display: inline-block; padding: 2px 8px; font-size: 10px; font-weight: 700; letter-spacing: 1px; margin-bottom: 8px; }}
+  .bias-card .direction.long {{ background: rgba(62,207,142,0.15); color: var(--green); }}
+  .bias-card .direction.short {{ background: rgba(232,56,79,0.15); color: var(--red); }}
+  .bias-card .confidence-bar {{ height: 4px; background: #2a1418; border-radius: 2px; overflow: hidden; margin: 6px 0; }}
+  .bias-card .confidence-fill {{ height: 100%; background: var(--red); }}
+  .bias-card .meta {{ font-size: 10px; color: var(--text-dim); }}
   .explain-cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; padding: 0 16px 16px 16px; }}
   .explain-card {{ background: var(--bg); border: 1px solid var(--border); padding: 12px; }}
   .explain-card .icon {{ font-size: 18px; }}
@@ -171,9 +254,17 @@ def index():
   <div class="stat-box"><div class="label">Strategies Vaulted</div><div class="value">{len(vault)}</div></div>
   <div class="stat-box"><div class="label">Pending Signals</div><div class="value red">{len(pending)}</div></div>
   <div class="stat-box"><div class="label">Closed Signals</div><div class="value">{len(closed)}</div></div>
-  <div class="stat-box"><div class="label">Live Win Rate</div>
-    <div class="value {'green' if live_win_rate and live_win_rate >= 50 else 'red'}">{live_win_rate if live_win_rate is not None else '--'}{'%' if live_win_rate is not None else ''}</div>
+  <div class="stat-box"><div class="label">Win Rate</div>
+    <div class="value {'green' if performance['win_rate'] and performance['win_rate'] >= 50 else 'red'}">{performance['win_rate'] if performance['win_rate'] is not None else '--'}{'%' if performance['win_rate'] is not None else ''}</div>
   </div>
+  <div class="stat-box"><div class="label">Net P&L (R-multiples)</div>
+    <div class="value {'green' if performance['net_r'] > 0 else 'red' if performance['net_r'] < 0 else ''}">{'+' if performance['net_r'] > 0 else ''}{performance['net_r']}R</div>
+  </div>
+</div>
+
+<div class="panel" id="bias-panel" style="display:none">
+  <div class="panel-header">Market Bias <span class="dim" style="font-size:10px">based on your ACTIVE strategies' backtest win rates -- not a black box</span></div>
+  <div id="bias-cards" style="display:flex; gap:12px; padding:16px; flex-wrap:wrap"></div>
 </div>
 
 <div class="panel">
@@ -209,6 +300,8 @@ const labels = {labels_json};
 const mechanisms = {mechanisms_json};
 let activeIds = {active_json};
 const explanations = {explanations_json};
+const performance = {performance_json};
+const marketBias = {bias_json};
 
 function calcRR(entry, stop, target) {{
   const risk = Math.abs(entry - stop);
@@ -629,6 +722,32 @@ function openInspector(genomeId) {{
   document.getElementById('inspector').scrollIntoView({{behavior: 'smooth', block: 'start'}});
 }}
 
+function renderBias() {{
+  const panel = document.getElementById('bias-panel');
+  const el = document.getElementById('bias-cards');
+  const symbols = Object.keys(marketBias);
+  if (symbols.length === 0) {{
+    panel.style.display = 'none';
+    return;
+  }}
+  panel.style.display = 'block';
+  el.innerHTML = symbols.map(sym => {{
+    const b = marketBias[sym];
+    const dirClass = b.direction === 'LONG' ? 'long' : b.direction === 'SHORT' ? 'short' : '';
+    const dirLabel = b.direction || 'NO LIVE SIGNAL';
+    return `
+      <div class="bias-card">
+        <div class="symbol">${{sym}}</div>
+        <div class="direction ${{dirClass}}">${{dirLabel}}</div>
+        <div class="confidence-bar"><div class="confidence-fill" style="width:${{b.confidence}}%"></div></div>
+        <div class="meta">${{b.active_count}} active strategies -- ${{b.avg_test_win_rate}}% avg backtest win rate</div>
+        <div class="meta">${{b.pending_signal_count}} live pending signal(s)</div>
+      </div>
+    `;
+  }}).join('');
+}}
+
+renderBias();
 renderSignals();
 renderVault();
 </script>
