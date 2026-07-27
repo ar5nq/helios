@@ -41,28 +41,34 @@ def compute_daily_orb(df: pd.DataFrame, start: tuple = (8, 12), end: tuple = (9,
 
 
 def detect_orb_breakout(df: pd.DataFrame, start: tuple = (8, 12), end: tuple = (9, 12)) -> pd.Series:
-    """Simple ORB: fires once per day when price closes beyond that day's
-    opening-range high (long) or low (short), after the window has closed."""
+    """ORB: fires once per day when price closes beyond that day's opening-range
+    high (long) or low (short), after the window has closed -- and STAYS in that
+    direction for the rest of the trading day, since an ORB breakout is meant to
+    be held toward the day's continuation, not exited after a single 5-min bar."""
     df_et = _to_et(df)
     daily_orb = compute_daily_orb(df, start, end)
     end_t = time(*end)
 
     sig = pd.Series(0, index=df.index)
-    fired_today = set()
+    day_direction = {}  # date -> 1, -1, or None (not yet broken out)
 
     for i, (ts, row) in enumerate(df_et.iterrows()):
         date = ts.date()
         if ts.time() < end_t or date not in daily_orb.index:
             continue
-        if date in fired_today:
-            continue
-        or_high, or_low = daily_orb.loc[date, "or_high"], daily_orb.loc[date, "or_low"]
-        if row["Close"] > or_high:
-            sig.iloc[i] = 1
-            fired_today.add(date)
-        elif row["Close"] < or_low:
-            sig.iloc[i] = -1
-            fired_today.add(date)
+
+        direction = day_direction.get(date)
+        if direction is None:
+            or_high, or_low = daily_orb.loc[date, "or_high"], daily_orb.loc[date, "or_low"]
+            if row["Close"] > or_high:
+                direction = 1
+                day_direction[date] = 1
+            elif row["Close"] < or_low:
+                direction = -1
+                day_direction[date] = -1
+
+        if direction:
+            sig.iloc[i] = direction
 
     return sig
 
@@ -81,7 +87,7 @@ def detect_orb_liquidity_cisd(df: pd.DataFrame, start: tuple = (8, 12), end: tup
     end_t = time(*end)
 
     sig = pd.Series(0, index=df.index)
-    day_state = {}  # date -> {'swept': 'buy'/'sell'/None, 'swept_at': int, 'sweep_price': float}
+    day_state = {}  # date -> {'swept': 'buy'/'sell'/'done', 'swept_at': int, 'direction': int}
 
     close = df_et["Close"]
 
@@ -90,7 +96,13 @@ def detect_orb_liquidity_cisd(df: pd.DataFrame, start: tuple = (8, 12), end: tup
         if ts.time() < end_t or date not in daily_orb.index:
             continue
 
-        state = day_state.setdefault(date, {"swept": None, "swept_at": None})
+        state = day_state.setdefault(date, {"swept": None, "swept_at": None, "direction": None})
+
+        if state["swept"] == "done":
+            # already confirmed a reversal today -- hold that direction for the rest of the day
+            sig.iloc[i] = state["direction"]
+            continue
+
         or_high, or_low = daily_orb.loc[date, "or_high"], daily_orb.loc[date, "or_low"]
 
         if state["swept"] is None:
@@ -111,15 +123,13 @@ def detect_orb_liquidity_cisd(df: pd.DataFrame, start: tuple = (8, 12), end: tup
         if recent_structure.empty:
             continue
 
-        if state["swept"] == "buy":
-            # CISD down: price closes below the lowest close since the sweep
-            if row["Close"] < recent_structure.min():
-                sig.iloc[i] = -1  # reverse of the buy-side sweep = short
-                state["swept"] = "done"
-        elif state["swept"] == "sell":
-            # CISD up: price closes above the highest close since the sweep
-            if row["Close"] > recent_structure.max():
-                sig.iloc[i] = 1  # reverse of the sell-side sweep = long
-                state["swept"] = "done"
+        if state["swept"] == "buy" and row["Close"] < recent_structure.min():
+            state["swept"] = "done"
+            state["direction"] = -1
+            sig.iloc[i] = -1
+        elif state["swept"] == "sell" and row["Close"] > recent_structure.max():
+            state["swept"] = "done"
+            state["direction"] = 1
+            sig.iloc[i] = 1
 
     return sig
