@@ -61,6 +61,8 @@ def run_campaign(symbol: str, timeframe: str, population: int = 40,
         pop.append(random_genome(symbol, timeframe))
 
     history = []
+    all_candidates = []  # (genome, result) from EVERY generation, not just the last
+
     for gen in range(generations):
         scored = []
         for g in pop:
@@ -71,6 +73,7 @@ def run_campaign(symbol: str, timeframe: str, population: int = 40,
             scored.append((g, result))
 
         scored.sort(key=lambda x: x[1]["fitness"], reverse=True)
+        all_candidates.extend(scored)
 
         # de-duplicate survivors by actual strategy config so identical clones
         # don't fill up all 10 "survivor" slots
@@ -105,14 +108,20 @@ def run_campaign(symbol: str, timeframe: str, population: int = 40,
         pop = next_pop
 
     # final vaulting: anything unique that cleared BOTH the fitness gate and the
-    # minimum out-of-sample trade count. A high fitness on <25 test trades is
-    # usually a small-sample coincidence, not a real edge (see the H4 case where
-    # 10 test trades produced a suspiciously clean 83% win rate).
+    # minimum out-of-sample trade count, checked across EVERY generation's
+    # population -- not just the last one. A genome (e.g. a rare ORB strategy)
+    # can score well in generation 1 but get bred out by generation 3 if its
+    # small sample size makes its fitness look mediocre in that one run; without
+    # checking every generation, a genuinely good result like that would never
+    # get vaulted at all.
     vault = _load_vault()
     seen_signatures = set()
     promoted = []
     rejected_thin_sample = 0
-    for g, r in scored:
+    # prefer the best-fitness version of each unique genome signature across
+    # all generations, not just whichever one happened to appear last
+    all_candidates.sort(key=lambda x: x[1]["fitness"], reverse=True)
+    for g, r in all_candidates:
         sig = _genome_signature(g)
         if sig in seen_signatures:
             continue
